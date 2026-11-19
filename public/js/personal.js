@@ -1,7 +1,7 @@
 // Vista del personal: bandeja, registro telefónico, tablero y administración
 'use strict';
 
-const S = { usuario: null, csrf: null, catalogo: null, vista: null, sel: null, filtros: { estado: 'ABIERTAS' }, refresco: null, demo: false };
+const S = { usuario: null, csrf: null, catalogo: null, vista: null, sel: null, filtros: { estado: 'ABIERTAS' }, refresco: null };
 const MENU = [
   { id: 'bandeja', nombre: 'Bandeja de incidencias', icono: 'bandeja', roles: ['ADMIN', 'OPERADOR', 'SUPERVISOR'] },
   { id: 'registrar', nombre: 'Registrar reporte', icono: 'mas', roles: ['ADMIN', 'OPERADOR'] },
@@ -20,8 +20,6 @@ const anchos = (raiz = document) => { for (const el of $$('[data-w]', raiz)) el.
 async function iniciar() {
   $('#logo').innerHTML = LOGO;
   $('#btn-salir').innerHTML = `${icono('salir')} Salir`;
-  try { S.demo = !!(await api('/api/publico/config')).demo; } catch { /* sin conexión */ }
-  $('#demo-cuentas').classList.toggle('oculto', !S.demo);
   const s = await api('/api/auth/sesion').catch(() => ({ usuario: null }));
   if (s.usuario) entrar(s); else mostrarLogin();
 }

@@ -216,8 +216,6 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 
 /* ---------- login personal ---------- */
 .login { max-width: 400px; margin: 8vh auto; }
-.demo-cuentas { font-size: .82rem; }
-.demo-cuentas td, .demo-cuentas th { padding: .3rem .4rem; }
 .cargando { opacity: .6; pointer-events: none; }
 
 /* utilidades */
