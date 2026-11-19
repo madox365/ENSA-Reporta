@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ENSA Reporta · Personal</title>
+  <meta name="theme-color" content="#1b3862">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/img/icono.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+  <header class="barra">
+    <a class="marca" href="/personal"><span id="logo"></span><span>ENSA Reporta<small>Gestión de incidencias · Personal</small></span></a>
+    <span class="espacio"></span>
+    <div class="chip-usuario oculto" id="chip-usuario"></div>
+    <button class="btn btn-texto oculto" id="btn-salir" type="button" title="Cerrar sesión"></button>
+  </header>
+
+  <!-- Inicio de sesión -->
+  <main id="v-login" class="oculto">
+    <form class="tarjeta login" id="f-login" novalidate>
+      <h2>Acceso del personal</h2>
+      <p class="muted peq">Atención al Cliente, áreas técnicas, Jefatura de TIC y Gerencia.</p>
+      <label for="l-usuario">Usuario</label>
+      <input id="l-usuario" type="text" autocomplete="username" required>
+      <label for="l-clave">Contraseña</label>
+      <input id="l-clave" type="password" autocomplete="current-password" required>
+      <div id="e-login"></div>
+      <button class="btn btn-primario btn-bloque mt" type="submit">Ingresar</button>
+      <div class="aviso aviso-info demo-cuentas mt" id="demo-cuentas">
+        <b>Usuarios de demostración</b> (contraseña <span class="mono">Ensa2027demo</span>)
+        <table><tbody>
+          <tr><td class="mono">operador.atc</td><td>Atención al Cliente</td></tr>
+          <tr><td class="mono">supervisor.ope</td><td>Operaciones (cortes, cables, tensión)</td></tr>
+          <tr><td class="mono">supervisor.alp</td><td>Alumbrado Público</td></tr>
+          <tr><td class="mono">supervisor.man</td><td>Mantenimiento de Redes (postes)</td></tr>
+          <tr><td class="mono">gerencia</td><td>Gerencia (solo tablero)</td></tr>
+          <tr><td class="mono">admin.tic</td><td>Administrador TIC</td></tr>
+        </tbody></table>
+      </div>
+    </form>
+  </main>
+
+  <!-- Aplicación -->
+  <div class="app oculto" id="v-app">
+    <nav class="menu" id="menu" aria-label="Menú"></nav>
+    <main class="principal" id="principal"></main>
+  </div>
+  <div class="tooltip oculto" id="tooltip"></div>
+
+  <script src="/js/comun.js"></script>
+  <script src="/js/personal.js"></script>
+</body>
+</html>

@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ENSA Reporta · Reporta fallas del servicio eléctrico</title>
+  <meta name="description" content="Reporta cortes de luz, cables caídos, postes dañados y alumbrado público en Lambayeque y Cajamarca, y sigue el estado de tu reporte.">
+  <meta name="theme-color" content="#1b3862">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/img/icono.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="/img/icono-192.png">
+  <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="vista-cliente">
+  <header class="barra">
+    <a class="marca" href="/" id="lnk-inicio"><span id="logo"></span><span>ENSA Reporta<small>Fallas del servicio eléctrico</small></span></a>
+    <span class="espacio"></span>
+    <button class="btn-texto btn" id="btn-ingresar" type="button"><span class="solo-escritorio">Ingresar con mi suministro</span><span class="solo-movil">Ingresar</span></button>
+    <button class="btn-texto btn oculto" id="btn-salir" type="button">Salir</button>
+  </header>
+
+  <!-- ============ INICIO ============ -->
+  <main id="v-inicio">
+    <section class="hero">
+      <div class="contenedor">
+        <h1>¿Hay una falla en el servicio eléctrico?</h1>
+        <p>Repórtala en un minuto y sigue su atención con tu número de seguimiento. Si tus vecinos ya la reportaron, tu aviso se suma al mismo caso.</p>
+      </div>
+    </section>
+    <div class="contenedor">
+      <div id="chip-cliente-inicio"></div>
+      <div class="opciones">
+        <button class="opcion" type="button" data-ir="reportar"><span data-icono="reportar"></span><span><b>Reportar una falla</b><span>Corte de luz, cable caído, poste dañado, alumbrado público o luz baja.</span></span></button>
+        <button class="opcion" type="button" data-ir="consultar"><span data-icono="buscar"></span><span><b>Consultar mi reporte</b><span>Con tu número de seguimiento o con tu suministro.</span></span></button>
+      </div>
+      <div class="emergencia mt" id="aviso-emergencia"></div>
+      <div class="tarjeta mt">
+        <h3>¿Qué puedo reportar aquí?</h3>
+        <p class="muted peq">Fallas del servicio en la calle o en tu vivienda. Los reclamos por el monto de tu recibo se presentan en el Libro de Reclamos de ENSA.</p>
+        <div class="tipos" id="tipos-info"></div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ INGRESO CON SUMINISTRO ============ -->
+  <main id="v-ingresar" class="oculto">
+    <div class="contenedor">
+      <div class="tarjeta">
+        <h2>Ingresar con mi suministro</h2>
+        <p class="muted">Al ingresar, tu dirección se completa sola y puedes ver todos tus reportes.</p>
+        <div class="recibo">
+          <svg viewBox="0 0 64 80" aria-hidden="true"><rect x="1" y="1" width="62" height="78" rx="4" fill="#fff" stroke="#c5d6ea"/><rect x="6" y="6" width="24" height="6" rx="1" fill="#0b2545"/><rect x="34" y="6" width="24" height="10" rx="2" fill="#fff7e0" stroke="#f2a900" stroke-width="1.5"/><rect x="37" y="9" width="18" height="4" rx="1" fill="#b37d00"/><rect x="6" y="20" width="52" height="3" rx="1" fill="#d9dfe7"/><rect x="6" y="27" width="40" height="3" rx="1" fill="#d9dfe7"/><rect x="6" y="34" width="46" height="3" rx="1" fill="#d9dfe7"/><rect x="6" y="60" width="52" height="12" rx="2" fill="#e6eef7"/></svg>
+          <div>El <b>número de suministro</b> está en la parte superior de tu recibo de luz, junto a tu nombre. También aparece cuando pagas en agentes o por aplicativo.</div>
+        </div>
+        <form id="f-ingresar" novalidate>
+          <label for="i-suministro">Número de suministro</label>
+          <input id="i-suministro" type="text" inputmode="numeric" autocomplete="off" maxlength="12" required>
+          <label for="i-documento">DNI (o RUC) del titular del suministro</label>
+          <input id="i-documento" type="text" inputmode="numeric" autocomplete="off" maxlength="11" required>
+          <p class="ayuda">Lo pedimos para confirmar que el suministro es tuyo. No compartimos tus datos.</p>
+          <div id="e-ingresar"></div>
+          <div class="acciones mt-s">
+            <button class="btn btn-primario" type="submit">Ingresar</button>
+            <button class="btn btn-sec" type="button" data-ir="reportar">Reportar sin ingresar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <!-- ============ REPORTAR ============ -->
+  <main id="v-reportar" class="oculto">
+    <div class="contenedor">
+      <form id="f-reporte" class="tarjeta" novalidate>
+        <h2>Reportar una falla</h2>
+        <div id="chip-cliente-reporte"></div>
+
+        <div class="seccion-titulo">1. ¿Qué pasa?</div>
+        <div class="tipos" id="tipos" role="group" aria-label="Tipo de incidencia"></div>
+        <div id="alerta-cable" class="aviso aviso-alerta oculto"><b>Peligro:</b> no te acerques ni toques el cable. Mantén alejadas a otras personas. Si hay chispas o fuego, llama también al 116 (Bomberos).</div>
+
+        <div class="seccion-titulo">2. ¿Dónde?</div>
+        <div id="donde-suministro" class="oculto">
+          <label class="check"><input type="radio" name="donde" value="suministro" checked> <span>En mi domicilio: <b id="dir-suministro"></b></span></label>
+          <label class="check"><input type="radio" name="donde" value="otro"> <span>En otro lugar (calle, parque, otro barrio)</span></label>
+        </div>
+        <div id="donde-otro">
+          <div class="fila">
+            <div><label for="r-unidad">Provincia / unidad</label><select id="r-unidad"></select></div>
+            <div><label for="r-zona">Distrito o zona</label><select id="r-zona" required></select></div>
+          </div>
+          <label for="r-direccion">Dirección o lugar</label>
+          <input id="r-direccion" type="text" maxlength="200" placeholder="Ej.: Calle Elías Aguirre 845" required>
+          <label for="r-referencia">Referencia <span class="opc">(opcional)</span></label>
+          <input id="r-referencia" type="text" maxlength="200" placeholder="Ej.: frente al parque, poste con número 12345">
+          <div class="acciones mt-s">
+            <button class="btn btn-sec" type="button" id="btn-gps"><span data-icono="gps"></span> Usar mi ubicación</button>
+            <span class="peq muted" id="gps-estado"></span>
+          </div>
+        </div>
+
+        <div class="seccion-titulo">3. Detalle <span class="opc">(opcional)</span></div>
+        <label for="r-descripcion">Cuéntanos qué ves</label>
+        <textarea id="r-descripcion" maxlength="500" placeholder="Ej.: desde las 7 p. m. toda la cuadra está sin luz"></textarea>
+        <label for="r-foto">Foto <span class="opc">(opcional)</span></label>
+        <input id="r-foto" type="file" accept="image/*" capture="environment">
+        <img id="r-foto-previa" class="foto-previa oculto" alt="Foto adjunta">
+
+        <div class="seccion-titulo">4. Tus datos de contacto</div>
+        <div class="fila">
+          <div><label for="r-nombre">Nombre</label><input id="r-nombre" type="text" maxlength="120" autocomplete="name" required></div>
+          <div><label for="r-telefono">Celular</label><input id="r-telefono" type="tel" inputmode="numeric" maxlength="9" autocomplete="tel" placeholder="9XXXXXXXX" required></div>
+        </div>
+        <div class="fila" id="datos-extra">
+          <div><label for="r-documento">DNI <span class="opc">(opcional)</span></label><input id="r-documento" type="text" inputmode="numeric" maxlength="8"></div>
+          <div><label for="r-suministro">N.° de suministro <span class="opc">(opcional)</span></label><input id="r-suministro" type="text" inputmode="numeric" maxlength="12"></div>
+        </div>
+        <label for="r-email">Correo <span class="opc">(opcional, para recibir el aviso)</span></label>
+        <input id="r-email" type="email" maxlength="120" autocomplete="email">
+        <p class="ayuda">Te enviaremos por SMS tu número de seguimiento y el aviso cuando la falla esté solucionada.</p>
+
+        <label class="check mt"><input id="r-consentimiento" type="checkbox"> <span>Autorizo a Electronorte S.A. a usar mis datos solo para atender este reporte y comunicarme su estado, conforme a la Ley N.° 29733, Ley de Protección de Datos Personales.</span></label>
+        <div id="e-reporte"></div>
+        <button class="btn btn-acento btn-bloque btn-grande mt" type="submit" id="btn-enviar">Enviar reporte</button>
+      </form>
+    </div>
+  </main>
+
+  <!-- ============ RESULTADO DEL REGISTRO ============ -->
+  <main id="v-resultado" class="oculto">
+    <div class="contenedor"><div class="tarjeta" id="resultado"></div></div>
+  </main>
+
+  <!-- ============ CONSULTAR ============ -->
+  <main id="v-consultar" class="oculto">
+    <div class="contenedor">
+      <div class="tarjeta" id="mis-reportes-tarjeta">
+        <h2>Mis reportes</h2>
+        <div id="mis-reportes"></div>
+      </div>
+      <form class="tarjeta" id="f-consulta" novalidate>
+        <h2>Consultar un reporte</h2>
+        <div class="fila">
+          <div><label for="c-codigo">Número de seguimiento</label><input id="c-codigo" type="text" placeholder="RP-2026-000123" maxlength="20" autocomplete="off"></div>
+          <div id="c-ultimos-campo"><label for="c-ultimos">Últimos 4 dígitos de tu celular</label><input id="c-ultimos" type="text" inputmode="numeric" maxlength="4" autocomplete="off"></div>
+        </div>
+        <div id="e-consulta"></div>
+        <button class="btn btn-primario mt-s" type="submit">Consultar</button>
+      </form>
+      <div class="tarjeta oculto" id="detalle-consulta"></div>
+    </div>
+  </main>
+
+  <footer class="pie">Electronorte S.A. · Grupo Distriluz · Lambayeque y Cajamarca<br><a href="/personal">Acceso del personal</a></footer>
+  <script src="/js/comun.js"></script>
+  <script src="/js/cliente.js"></script>
+</body>
+</html>

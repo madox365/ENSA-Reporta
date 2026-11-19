@@ -1,0 +1,16 @@
+{
+  "name": "ENSA Reporta",
+  "short_name": "ENSA Reporta",
+  "description": "Reporta fallas del servicio eléctrico de Electronorte S.A. y sigue su atención.",
+  "lang": "es-PE",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1b3862",
+  "theme_color": "#1b3862",
+  "icons": [
+    { "src": "/img/icono-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/img/icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/img/icono.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}

@@ -1,0 +1,21 @@
+{
+  "name": "ensa-reporta",
+  "version": "1.0.0",
+  "description": "Sistema de gestión de incidencias del servicio para clientes de Electronorte S.A. (P01 del PETI)",
+  "main": "src/server.js",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "start": "node --no-warnings src/server.js",
+    "test": "node --no-warnings --test test/sistema.test.js",
+    "reiniciar-demo": "node --no-warnings scripts/reiniciar-demo.js",
+    "importar-suministros": "node --no-warnings scripts/importar-suministros.js",
+    "respaldo": "node --no-warnings scripts/respaldo.js"
+  },
+  "dependencies": {
+    "express": "^4.22.3"
+  }
+}

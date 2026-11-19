@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760" font-family="Arial, Helvetica, sans-serif">
+<rect width="1200" height="760" fill="#fff"/>
+<text x="600" y="34" text-anchor="middle" font-size="21" font-weight="bold" fill="#0b2545">Modelo de datos (entidades principales)</text>
+<g font-size="12" fill="#1c2430">
+<!-- entity helper: header rect + body -->
+<rect x="450" y="70" width="300" height="300" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="450" y="70" width="300" height="30" rx="6" fill="#23609e"/>
+<text x="600" y="90" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">incidencia</text>
+<text x="462" y="120">PK id · codigo (INC-AAAA-NNNNNN)</text><text x="462" y="140">FK tipo_id · FK zona_id · FK area_id</text><text x="462" y="160">direccion · lat · lng</text><text x="462" y="180">estado · prioridad · cuadrilla</text><text x="462" y="200">fecha_registro · fecha_limite</text><text x="462" y="220">fecha_asignacion · fecha_atencion</text><text x="462" y="240">fecha_solucion · detalle_solucion</text><text x="462" y="260">FK fusionada_en_id (incidencia)</text><text x="462" y="280">cantidad_reportes</text>
+<rect x="450" y="420" width="300" height="300" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="450" y="420" width="300" height="30" rx="6" fill="#23609e"/>
+<text x="600" y="440" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">reporte</text>
+<text x="462" y="470">PK id · codigo (RP-AAAA-NNNNNN)</text><text x="462" y="490">FK incidencia_id</text><text x="462" y="510">canal (WEB, APP, TELEFONO, OFICINA…)</text><text x="462" y="530">nombre · documento · telefono · email</text><text x="462" y="550">suministro · sed · autenticado</text><text x="462" y="570">direccion · referencia · lat · lng</text><text x="462" y="590">descripcion · foto</text><text x="462" y="610">es_duplicado · tipo_agrupacion</text><text x="462" y="630">consentimiento · FK registrado_por</text><text x="462" y="650">fecha</text>
+<rect x="60" y="70" width="290" height="170" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="60" y="70" width="290" height="30" rx="6" fill="#23609e"/>
+<text x="205" y="90" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">tipo_incidencia</text>
+<text x="72" y="120">PK id · codigo · nombre</text><text x="72" y="140">prioridad · plazo_horas</text><text x="72" y="160">FK area_id</text><text x="72" y="180">radio_agrupacion_m</text><text x="72" y="200">ventana_agrupacion_h · activo</text>
+<rect x="60" y="280" width="290" height="110" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="60" y="280" width="290" height="30" rx="6" fill="#23609e"/>
+<text x="205" y="300" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">zona  ·  unidad_negocio</text>
+<text x="72" y="330">zona: PK id · FK unidad_negocio_id</text><text x="72" y="350">nombre · lat · lng</text><text x="72" y="370">unidad_negocio: 3 unidades de negocio</text>
+<rect x="60" y="430" width="290" height="70" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="60" y="430" width="290" height="30" rx="6" fill="#23609e"/>
+<text x="205" y="450" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">area</text>
+<text x="72" y="482">PK id · codigo · nombre</text>
+<rect x="60" y="540" width="290" height="170" rx="6" fill="#fff" stroke="#b37d00" stroke-width="2"/><rect x="60" y="540" width="290" height="30" rx="6" fill="#b37d00"/>
+<text x="205" y="560" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">suministro (padrón)</text>
+<text x="72" y="590">PK numero</text><text x="72" y="610">titular · documento</text><text x="72" y="630">direccion · FK zona_id · lat · lng</text><text x="72" y="650">sed (subestación) · telefono</text><text x="72" y="670">actualizado</text><text x="72" y="692" fill="#4a5566">Copia periódica de Optimus NGC</text>
+<rect x="850" y="70" width="290" height="130" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="850" y="70" width="290" height="30" rx="6" fill="#23609e"/>
+<text x="995" y="90" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">historial</text>
+<text x="862" y="120">PK id · FK incidencia_id</text><text x="862" y="140">estado_anterior · estado_nuevo</text><text x="862" y="160">comentario · FK usuario_id · fecha</text>
+<rect x="850" y="240" width="290" height="150" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="850" y="240" width="290" height="30" rx="6" fill="#23609e"/>
+<text x="995" y="260" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">usuario</text>
+<text x="862" y="290">PK id · usuario · nombre</text><text x="862" y="310">rol (ADMIN, OPERADOR,</text><text x="862" y="330">SUPERVISOR, GERENCIA)</text><text x="862" y="350">FK area_id · clave_hash · activo</text>
+<rect x="850" y="430" width="290" height="130" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="850" y="430" width="290" height="30" rx="6" fill="#23609e"/>
+<text x="995" y="450" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">notificacion</text>
+<text x="862" y="480">PK id · FK reporte_id</text><text x="862" y="500">canal (SMS, EMAIL) · destino</text><text x="862" y="520">mensaje · estado · fecha</text>
+<rect x="850" y="600" width="290" height="110" rx="6" fill="#fff" stroke="#23609e" stroke-width="2"/><rect x="850" y="600" width="290" height="30" rx="6" fill="#23609e"/>
+<text x="995" y="620" text-anchor="middle" font-weight="bold" fill="#fff" font-size="14">auditoria</text>
+<text x="862" y="650">PK id · FK usuario_id · accion</text><text x="862" y="670">entidad · entidad_id · detalle</text><text x="862" y="690">ip · fecha</text>
+</g>
+<g stroke="#4a5566" stroke-width="1.6" fill="none" font-size="12">
+<path d="M600 370 L600 420"/><text x="610" y="390" fill="#4a5566" stroke="none">1</text><text x="610" y="414" fill="#4a5566" stroke="none">N</text>
+<path d="M350 155 L450 155"/><text x="356" y="148" fill="#4a5566" stroke="none">1</text><text x="436" y="148" fill="#4a5566" stroke="none">N</text>
+<path d="M350 335 L450 300"/><text x="356" y="328" fill="#4a5566" stroke="none">1</text><text x="436" y="296" fill="#4a5566" stroke="none">N</text>
+<path d="M350 465 L400 465 L400 330 L450 330"/><text x="356" y="458" fill="#4a5566" stroke="none">1</text><text x="436" y="324" fill="#4a5566" stroke="none">N</text>
+<path d="M350 600 L450 560" stroke-dasharray="5 4"/><text x="362" y="622" fill="#4a5566" stroke="none">suministro / sed</text>
+<path d="M750 135 L850 135"/><text x="756" y="128" fill="#4a5566" stroke="none">1</text><text x="836" y="128" fill="#4a5566" stroke="none">N</text>
+<path d="M750 520 L850 500"/><text x="756" y="512" fill="#4a5566" stroke="none">1</text><text x="836" y="492" fill="#4a5566" stroke="none">N</text>
+<path d="M995 390 L995 430" stroke-dasharray="3 3"/>
+<path d="M995 560 L995 600" stroke-dasharray="3 3"/>
+</g>
+</svg>
