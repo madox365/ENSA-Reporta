@@ -1,6 +1,6 @@
 // Service worker: guarda la interfaz del cliente para que abra rápido y funcione como app.
 // Los datos (API) siempre se piden al servidor; no se guardan datos personales en caché.
-const CACHE = 'ensa-reporta-v3';
+const CACHE = 'ensa-reporta-v5';
 const ARCHIVOS = ['/', '/index.html', '/css/app.css', '/js/comun.js', '/js/cliente.js', '/manifest.webmanifest', '/img/icono.svg', '/img/icono-192.png'];
 
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ARCHIVOS))); self.skipWaiting(); });

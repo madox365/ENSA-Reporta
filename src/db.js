@@ -13,7 +13,25 @@ function abrir(ruta) {
   bd = new DatabaseSync(ruta);
   bd.exec('PRAGMA foreign_keys = ON;');
   if (ruta !== ':memory:') bd.exec('PRAGMA journal_mode = WAL;');
+  // Una base creada con la versión anterior (sin órdenes de trabajo) no es compatible
+  const existe = bd.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'incidencia'").get();
+  const nueva = bd.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'orden_trabajo'").get();
+  if (existe && !nueva) {
+    bd.close(); bd = null;
+    throw Object.assign(new Error('La base de datos es de una versión anterior del sistema.'), { code: 'ESQUEMA_ANTIGUO' });
+  }
+  // La primera versión de la encuesta tenía más preguntas: se rehace la tabla conservando las respuestas
+  const colsEncuesta = bd.prepare('PRAGMA table_info(encuesta)').all().map((c) => c.name);
+  if (colsEncuesta.includes('trato')) {
+    bd.exec(`ALTER TABLE encuesta RENAME TO encuesta_v1;
+             DROP INDEX IF EXISTS ix_encuesta_incidencia; DROP INDEX IF EXISTS ix_encuesta_cuadrilla;`);
+  }
   bd.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+  if (colsEncuesta.includes('trato')) {
+    bd.exec(`INSERT INTO encuesta (id, reporte_id, incidencia_id, orden_trabajo_id, cuadrilla_id, general, rapidez, fecha)
+               SELECT id, reporte_id, incidencia_id, orden_trabajo_id, cuadrilla_id, general, rapidez, fecha FROM encuesta_v1;
+             DROP TABLE encuesta_v1;`);
+  }
   return bd;
 }
 

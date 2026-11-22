@@ -57,6 +57,12 @@ const texto = (v, max = 200) => (v == null ? '' : String(v).trim().slice(0, max)
 const opcional = (v, max = 200) => { const t = texto(v, max); return t || null; };
 const numero = (v) => (v === '' || v == null || Number.isNaN(Number(v)) ? null : Number(v));
 
+// Hora de Lima (UTC-5, sin horario de verano) para mensajes al cliente
+function horaLima(isoTxt) {
+  const d = new Date(new Date(isoTxt).getTime() - 5 * 3600e3);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
 function enmascararTelefono(t) {
   const s = String(t || '');
   return s.length >= 4 ? '*'.repeat(s.length - 3) + s.slice(-3) : s;
@@ -65,5 +71,5 @@ function enmascararTelefono(t) {
 module.exports = {
   ahora, fijarReloj, iso, sumarHoras, horasEntre, distanciaM,
   normalizarDireccion, similitudDireccion, hashClave, verificarClave,
-  ErrorNegocio, texto, opcional, numero, enmascararTelefono,
+  ErrorNegocio, texto, opcional, numero, enmascararTelefono, horaLima,
 };

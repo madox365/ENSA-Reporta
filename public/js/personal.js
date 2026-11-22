@@ -3,15 +3,17 @@
 
 const S = { usuario: null, csrf: null, catalogo: null, vista: null, sel: null, filtros: { estado: 'ABIERTAS' }, refresco: null };
 const MENU = [
-  { id: 'bandeja', nombre: 'Bandeja de incidencias', icono: 'bandeja', roles: ['ADMIN', 'OPERADOR', 'SUPERVISOR'] },
-  { id: 'registrar', nombre: 'Registrar reporte', icono: 'mas', roles: ['ADMIN', 'OPERADOR'] },
-  { id: 'tablero', nombre: 'Tablero de indicadores', icono: 'tablero', roles: ['ADMIN', 'OPERADOR', 'SUPERVISOR', 'GERENCIA'] },
-  { id: 'notificaciones', nombre: 'Avisos enviados', icono: 'campana', roles: ['ADMIN', 'OPERADOR'] },
+  { id: 'mis-ordenes', nombre: 'Mis órdenes de trabajo', icono: 'bandeja', roles: ['JEFE_CUADRILLA'] },
+  { id: 'bandeja', nombre: 'Bandeja de incidencias', icono: 'bandeja', roles: ['ADMIN', 'OPERADOR', 'DESPACHADOR', 'SUPERVISOR'] },
+  { id: 'registrar', nombre: 'Registrar reporte', icono: 'mas', roles: ['ADMIN', 'OPERADOR', 'DESPACHADOR'] },
+  { id: 'cuadrillas', nombre: 'Cuadrillas', icono: 'usuarios', roles: ['ADMIN', 'DESPACHADOR', 'SUPERVISOR', 'OPERADOR', 'GERENCIA'] },
+  { id: 'tablero', nombre: 'Tablero de indicadores', icono: 'tablero', roles: ['ADMIN', 'OPERADOR', 'DESPACHADOR', 'SUPERVISOR', 'GERENCIA'] },
+  { id: 'notificaciones', nombre: 'Avisos enviados', icono: 'campana', roles: ['ADMIN', 'OPERADOR', 'DESPACHADOR'] },
   { id: 'catalogo', nombre: 'Catálogo de incidencias', icono: 'ajustes', roles: ['ADMIN'] },
   { id: 'usuarios', nombre: 'Usuarios', icono: 'usuarios', roles: ['ADMIN'] },
   { id: 'auditoria', nombre: 'Auditoría', icono: 'escudo', roles: ['ADMIN'] },
 ];
-const ROLES = { ADMIN: 'Administrador TIC', OPERADOR: 'Atención al Cliente', SUPERVISOR: 'Supervisor de área', GERENCIA: 'Gerencia' };
+const ROLES = { ADMIN: 'Administrador TIC', OPERADOR: 'Atención al Cliente', DESPACHADOR: 'Centro de Control de Operaciones', SUPERVISOR: 'Supervisor de área', JEFE_CUADRILLA: 'Jefe de cuadrilla', GERENCIA: 'Gerencia' };
 const P = $('#principal');
 const llamar = (ruta, op = {}) => api(ruta, { ...op, csrf: S.csrf }).catch((e) => { if (e.estado === 401) mostrarLogin(e.message); throw e; });
 const anchos = (raiz = document) => { for (const el of $$('[data-w]', raiz)) el.style.width = `${el.dataset.w}%`; };
@@ -44,9 +46,9 @@ $('#btn-salir').addEventListener('click', async () => { await api('/api/auth/log
 async function entrar(s) {
   S.usuario = s.usuario; S.csrf = s.csrf;
   S.catalogo = await llamar('/api/catalogo');
-  if (S.usuario.rol === 'SUPERVISOR' && S.usuario.area_id) S.filtros.area_id = String(S.usuario.area_id);
+  if (['SUPERVISOR', 'DESPACHADOR'].includes(S.usuario.rol) && S.usuario.area_id) S.filtros.area_id = String(S.usuario.area_id);
   $('#v-login').classList.add('oculto'); $('#v-app').classList.remove('oculto');
-  $('#chip-usuario').innerHTML = `<b>${esc(S.usuario.nombre)}</b>${esc(ROLES[S.usuario.rol])}`;
+  $('#chip-usuario').innerHTML = `<b>${esc(S.usuario.nombre.split(' · ')[0])}</b>${esc(ROLES[S.usuario.rol])}`;
   $('#chip-usuario').classList.remove('oculto'); $('#btn-salir').classList.remove('oculto');
   const opciones = MENU.filter((m) => m.roles.includes(S.usuario.rol));
   $('#menu').innerHTML = `<div class="rol">${esc(ROLES[S.usuario.rol])}</div>` + opciones.map((m) => `<button type="button" data-vista="${m.id}">${icono(m.icono)} ${esc(m.nombre)}</button>`).join('');
@@ -60,7 +62,7 @@ function abrir(vista) {
   history.replaceState(null, '', `#${vista}`);
   for (const b of $$('#menu [data-vista]')) b.classList.toggle('activo', b.dataset.vista === vista);
   clearInterval(S.refresco);
-  ({ bandeja: vBandeja, registrar: vRegistrar, tablero: vTablero, notificaciones: vNotificaciones, catalogo: vCatalogo, usuarios: vUsuarios, auditoria: vAuditoria })[vista]();
+  ({ 'mis-ordenes': vMisOrdenes, cuadrillas: vCuadrillas, bandeja: vBandeja, registrar: vRegistrar, tablero: vTablero, notificaciones: vNotificaciones, catalogo: vCatalogo, usuarios: vUsuarios, auditoria: vAuditoria })[vista]();
 }
 
 const opcionesDe = (lista, valor, vacio, etiqueta = (x) => x.nombre) =>
@@ -68,8 +70,8 @@ const opcionesDe = (lista, valor, vacio, etiqueta = (x) => x.nombre) =>
 const unidadCorta = (u) => u.nombre.replace('Unidad de Negocio ', '');
 
 function restante(inc) {
-  if (!['REGISTRADA', 'ASIGNADA', 'EN_ATENCION'].includes(inc.estado)) {
-    if (inc.estado === 'SOLUCIONADA') {
+  if (!ABIERTOS.includes(inc.estado)) {
+    if (['SOLUCIONADA', 'RESTABLECIDA'].includes(inc.estado) && inc.fecha_solucion) {
       const enPlazo = inc.fecha_solucion <= inc.fecha_limite;
       return `<span class="${enPlazo ? '' : 'vencida'}">${enPlazo ? 'En plazo' : 'Fuera de plazo'}</span>`;
     }
@@ -87,7 +89,7 @@ function vBandeja() {
     <div class="cabecera"><h1>Bandeja de incidencias</h1><span class="muted peq" id="b-total"></span></div>
     <form class="filtros" id="b-filtros">
       <div><label for="f-estado">Estado</label><select id="f-estado" name="estado">
-        ${[['ABIERTAS', 'Abiertas'], ['', 'Todas'], ['REGISTRADA', 'Registradas'], ['ASIGNADA', 'Asignadas'], ['EN_ATENCION', 'En atención'], ['SOLUCIONADA', 'Solucionadas'], ['ANULADA', 'Anuladas']].map(([v, t]) => `<option value="${v}" ${f.estado === v ? 'selected' : ''}>${t}</option>`).join('')}
+        ${[['ABIERTAS', 'Abiertas'], ['', 'Todas'], ['REGISTRADA', 'Por despachar'], ['ASIGNADA', 'Con orden de trabajo'], ['EN_CAMPO', 'Cuadrilla en campo'], ['RESTABLECIDA', 'Por validar'], ['SOLUCIONADA', 'Solucionadas'], ['ANULADA', 'Anuladas']].map(([v, t]) => `<option value="${v}" ${f.estado === v ? 'selected' : ''}>${t}</option>`).join('')}
       </select></div>
       <div><label for="f-unidad">Unidad</label><select id="f-unidad" name="unidad_id">${opcionesDe(c.unidades, f.unidad_id, 'Todas', unidadCorta)}</select></div>
       <div><label for="f-tipo">Tipo</label><select id="f-tipo" name="tipo_id">${opcionesDe(c.tipos, f.tipo_id, 'Todos')}</select></div>
@@ -122,97 +124,17 @@ async function cargarBandeja(silencioso = false) {
     const q = new URLSearchParams(S.filtros).toString();
     const lista = await llamar(`/api/incidencias?${q}`);
     $('#b-total').textContent = `${lista.length} incidencia(s)${lista.length >= 300 ? ' · se muestran las 300 primeras' : ''}`;
-    cont.innerHTML = lista.length ? `<table><thead><tr><th>Incidencia</th><th>Tipo / zona</th><th class="num">Rep.</th><th>Estado</th><th>Plazo</th><th>Área</th></tr></thead><tbody>
+    cont.innerHTML = lista.length ? `<table><thead><tr><th>Incidencia</th><th>Tipo / zona</th><th class="num">Rep.</th><th>Estado</th><th>Plazo</th><th>Cuadrilla</th></tr></thead><tbody>
       ${lista.map((i) => `<tr class="clic ${i.id === S.sel ? 'sel' : ''}" data-id="${i.id}">
-        <td><span class="mono">${esc(i.codigo)}</span><br><span class="prio p-${i.prioridad}">${esc(i.prioridad)}</span> <span class="muted peq">${fecha(i.fecha_registro)}</span></td>
-        <td>${esc(i.tipo)}<br><span class="muted peq">${esc(i.zona)} · ${esc(i.direccion.slice(0, 48))}</span></td>
+        <td><span class="mono sin-corte">${esc(i.codigo)}</span><br><span class="prio p-${i.prioridad}">${esc(i.prioridad)}</span> <span class="muted peq">${fecha(i.fecha_registro)}</span></td>
+        <td>${esc(i.tipo)}<br><span class="muted peq">${esc(i.zona)} · ${esc(i.direccion.slice(0, 34))}</span></td>
         <td class="num">${i.cantidad_reportes}</td>
         <td>${chipEstado(i.estado)}</td>
         <td class="peq">${restante(i)}</td>
-        <td class="peq">${esc(i.area)}${i.cuadrilla ? `<br><span class="muted">${esc(i.cuadrilla)}</span>` : ''}</td></tr>`).join('')}
+        <td class="peq">${i.cuadrilla ? `<b class="mono">${esc(i.cuadrilla)}</b>${i.orden_estado === 'EN_CAMINO' && i.eta ? `<br><span class="muted">llega ${fecha(i.eta).slice(-5)}</span>` : ''}` : `<span class="muted">Sin asignar</span>`}${i.requiere_acceso ? '<br><span class="etiqueta" title="La cuadrilla debe entrar al predio">acceso</span>' : ''}${i.reaperturas ? '<br><span class="etiqueta vencida" title="El cliente indicó que la falla continúa">reabierta</span>' : ''}</td></tr>`).join('')}
       </tbody></table>` : '<p class="muted">No hay incidencias con estos filtros.</p>';
     for (const tr of $$('tr[data-id]', cont)) tr.addEventListener('click', () => verDetalle(Number(tr.dataset.id)));
   } catch (e) { if (!silencioso) mostrarError(cont, e); }
-}
-
-async function verDetalle(id) {
-  S.sel = id;
-  for (const tr of $$('#b-lista tr[data-id]')) tr.classList.toggle('sel', Number(tr.dataset.id) === id);
-  const p = $('#b-detalle');
-  if (!p) return;
-  p.innerHTML = '<p class="muted">Cargando…</p>';
-  let i;
-  try { i = await llamar(`/api/incidencias/${id}`); } catch (e) { mostrarError(p, e); return; }
-  const u = S.usuario, abierta = ['REGISTRADA', 'ASIGNADA', 'EN_ATENCION'].includes(i.estado);
-  const supervisorOtraArea = u.rol === 'SUPERVISOR' && u.area_id && u.area_id !== i.area_id;
-  const puede = (acc) => {
-    const reglas = { asignar: [['REGISTRADA', 'ASIGNADA'], ['ADMIN', 'OPERADOR', 'SUPERVISOR']], iniciar: [['ASIGNADA'], ['ADMIN', 'SUPERVISOR']], solucionar: [['ASIGNADA', 'EN_ATENCION'], ['ADMIN', 'SUPERVISOR']], anular: [['REGISTRADA', 'ASIGNADA'], ['ADMIN', 'OPERADOR', 'SUPERVISOR']] };
-    return reglas[acc][0].includes(i.estado) && reglas[acc][1].includes(u.rol) && !supervisorOtraArea;
-  };
-  const mapa = i.lat != null ? `<a href="https://www.openstreetmap.org/?mlat=${i.lat}&mlon=${i.lng}#map=18/${i.lat}/${i.lng}" target="_blank" rel="noopener">Ver en mapa</a>` : '<span class="muted">Sin GPS</span>';
-  p.innerHTML = `
-    <div class="cabecera"><h2 class="mono">${esc(i.codigo)}</h2>${chipEstado(i.estado)}</div>
-    <dl class="dl">
-      <dt>Tipo</dt><dd>${esc(i.tipo)} · <span class="prio p-${i.prioridad}">${esc(i.prioridad)}</span></dd>
-      <dt>Ubicación</dt><dd>${esc(i.direccion)}<br>${esc(i.zona)} · ${esc(i.unidad.replace('Unidad de Negocio ', ''))} · ${mapa}</dd>
-      <dt>Área</dt><dd>${esc(i.area)}${i.cuadrilla ? ` · ${esc(i.cuadrilla)}` : ''}</dd>
-      <dt>Registrada</dt><dd>${fecha(i.fecha_registro)}</dd>
-      <dt>Plazo</dt><dd>${fecha(i.fecha_limite)} (${i.plazo_horas} h) · ${restante(i)}</dd>
-      ${i.fecha_atencion ? `<dt>En atención</dt><dd>${fecha(i.fecha_atencion)}</dd>` : ''}
-      ${i.fecha_solucion ? `<dt>Solucionada</dt><dd>${fecha(i.fecha_solucion)} · ${duracion((new Date(i.fecha_solucion) - new Date(i.fecha_registro)) / 3600e3)}</dd>` : ''}
-      ${i.detalle_solucion ? `<dt>Solución</dt><dd>${esc(i.detalle_solucion)}</dd>` : ''}
-      ${i.fusionada_en ? `<dt>Fusionada en</dt><dd class="mono">${esc(i.fusionada_en)}</dd>` : ''}
-    </dl>
-    ${supervisorOtraArea && abierta ? '<div class="aviso aviso-info peq">Esta incidencia pertenece a otra área. Solo puedes verla.</div>' : ''}
-    <div id="d-error"></div>
-    ${puede('asignar') ? `<form class="accion-form" data-accion="asignar"><h3>${i.estado === 'ASIGNADA' ? 'Reasignar' : 'Asignar'}</h3>
-      <div class="fila"><div><label>Área</label><select name="area_id">${opcionesDe(S.catalogo.areas.filter((a) => a.codigo !== 'ATC'), i.area_id)}</select></div>
-      <div><label>Cuadrilla o responsable</label><input name="cuadrilla" type="text" maxlength="80" value="${esc(i.cuadrilla || '')}" placeholder="Ej.: Cuadrilla Emergencias 01" required></div></div>
-      <button class="btn btn-primario mt-s" type="submit">${i.estado === 'ASIGNADA' ? 'Reasignar' : 'Asignar'}</button></form>` : ''}
-    ${puede('iniciar') ? '<form class="accion-form" data-accion="iniciar"><h3>Cuadrilla en campo</h3><button class="btn btn-primario" type="submit">Marcar "En atención"</button></form>' : ''}
-    ${puede('solucionar') ? `<form class="accion-form" data-accion="solucionar"><h3>Cerrar como solucionada</h3>
-      <label>Solución aplicada</label><textarea name="detalle_solucion" maxlength="500" required placeholder="Ej.: se cambió el fusible de la SED y se restableció el servicio"></textarea>
-      <p class="ayuda">Se enviará un aviso por SMS (y correo, si lo dejó) a los ${i.cantidad_reportes} cliente(s) que reportaron.</p>
-      <button class="btn btn-acento mt-s" type="submit">Marcar solucionada</button></form>` : ''}
-    ${abierta && u.rol !== 'GERENCIA' && !supervisorOtraArea ? `<form class="accion-form" data-accion="fusionar"><h3>¿Es un duplicado?</h3>
-      <p class="ayuda">Si esta falla ya está registrada en otra incidencia abierta del mismo tipo, fusiónala: sus reportes pasan a la otra.</p>
-      <div class="fila"><div><input name="destino" type="text" placeholder="INC-2026-000123" required></div><div><button class="btn btn-sec" type="submit">Fusionar</button></div></div></form>` : ''}
-    ${puede('anular') ? `<form class="accion-form" data-accion="anular"><h3>Anular</h3>
-      <input name="comentario" type="text" maxlength="200" placeholder="Motivo (ej.: falla en instalación interna del cliente)" required>
-      <button class="btn btn-peligro mt-s" type="submit">Anular incidencia</button></form>` : ''}
-    <h3 class="mt">Reportes de clientes (${i.reportes.length})</h3>
-    ${i.reportes.map((r) => `<div class="reporte-item">
-      <b class="mono">${esc(r.codigo)}</b><span class="etiqueta">${esc(CANALES[r.canal] || r.canal)}</span>${r.es_duplicado ? `<span class="etiqueta dup">Duplicado · ${r.tipo_agrupacion === 'MANUAL' ? 'fusión manual' : 'agrupado auto.'}</span>` : ''}${r.autenticado ? '<span class="etiqueta auth">Con suministro</span>' : ''}
-      <div>${esc(r.nombre)} · ${esc(r.telefono)}${r.email ? ` · ${esc(r.email)}` : ''}</div>
-      <div class="muted">${fecha(r.fecha)}${r.suministro ? ` · Sum. ${esc(r.suministro)}` : ''}${r.sed ? ` · ${esc(r.sed)}` : ''}${r.registrado_por_nombre ? ` · registró ${esc(r.registrado_por_nombre)}` : ''}</div>
-      <div>${esc(r.direccion)}${r.referencia ? ` (${esc(r.referencia)})` : ''}</div>
-      ${r.descripcion ? `<div><i>“${esc(r.descripcion)}”</i></div>` : ''}
-      ${r.foto ? `<img src="/api/fotos/${esc(r.foto)}" alt="Foto del reporte ${esc(r.codigo)}" loading="lazy">` : ''}
-    </div>`).join('')}
-    <h3 class="mt">Historial</h3>
-    <ol class="linea">${i.historial.map((h) => `<li class="hecho"><b>${esc(ESTADOS[h.estado_nuevo] || h.estado_nuevo)}</b><span class="peq">${esc(h.comentario || '')}</span><br><span class="muted peq">${fecha(h.fecha)}${h.usuario ? ` · ${esc(h.usuario)}` : ' · Cliente'}</span></li>`).join('')}</ol>`;
-  for (const f of $$('form[data-accion]', p)) {
-    f.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const acc = f.dataset.accion, datos = Object.fromEntries(new FormData(f).entries());
-      if (acc === 'anular' && !confirmar(f)) return;
-      f.classList.add('cargando'); mostrarError($('#d-error'));
-      try {
-        await llamar(`/api/incidencias/${id}/${acc}`, { metodo: 'POST', datos });
-        await cargarBandeja();
-        if (acc === 'fusionar') { const d = await llamar(`/api/incidencias/buscar/${encodeURIComponent(datos.destino)}`); verDetalle(d.id); } else verDetalle(id);
-      } catch (err) { mostrarError($('#d-error'), err); $('#d-error').scrollIntoView({ block: 'nearest' }); } finally { f.classList.remove('cargando'); }
-    });
-  }
-}
-// Confirmación en dos pasos (sin diálogos del navegador)
-function confirmar(form) {
-  if (form.dataset.confirmado) return true;
-  form.dataset.confirmado = '1';
-  const b = form.querySelector('button[type=submit]');
-  b.textContent = 'Confirmar anulación';
-  setTimeout(() => { delete form.dataset.confirmado; b.textContent = 'Anular incidencia'; }, 5000);
-  return false;
 }
 
 // ------------------------------------------------------------- registro por teléfono u oficina
@@ -235,6 +157,14 @@ function vRegistrar() {
       </div>
       <label for="g-direccion">Dirección o lugar</label><input id="g-direccion" name="direccion" type="text" maxlength="200" required>
       <label for="g-referencia">Referencia <span class="opc">(opcional)</span></label><input id="g-referencia" name="referencia" type="text" maxlength="200">
+      <div id="g-alcance" class="oculto">
+        <label for="g-alcance-sel">¿A quién afecta?</label>
+        <select id="g-alcance-sel" name="alcance"><option value="VARIAS_CASAS">Varias casas o toda la calle</option><option value="SOLO_MI_CASA">Solo la casa del cliente</option><option value="NO_SE">No sabe</option></select>
+        <div id="g-acceso" class="oculto">
+          <label class="check mt-s"><input type="checkbox" name="requiere_acceso" value="1" id="g-requiere"> La cuadrilla necesitará entrar al predio (medidor dentro de la casa o medir la luz baja)</label>
+          <div id="g-franja-campo" class="oculto"><label for="g-franja">Horario en que habrá alguien</label><select id="g-franja" name="franja_horaria">${(c.franjas || []).map((x) => `<option value="${x.codigo}">${esc(x.nombre)}</option>`).join('')}</select></div>
+        </div>
+      </div>
       <label for="g-descripcion">Lo que informa el cliente <span class="opc">(opcional)</span></label><textarea id="g-descripcion" name="descripcion" maxlength="500"></textarea>
       <div class="fila">
         <div><label for="g-nombre">Nombre del cliente</label><input id="g-nombre" name="nombre" type="text" maxlength="120" required></div>
@@ -249,6 +179,14 @@ function vRegistrar() {
       <button class="btn btn-acento btn-grande mt" type="submit">Registrar reporte</button>
     </form>
     <div id="g-resultado"></div>`;
+  const alcance = () => {
+    const t = c.tipos.find((x) => String(x.id) === $('#g-tipo').value);
+    const aplica = t && ['CORTE', 'TENSION'].includes(t.codigo);
+    $('#g-alcance').classList.toggle('oculto', !aplica);
+    $('#g-acceso').classList.toggle('oculto', !aplica || $('#g-alcance-sel').value !== 'SOLO_MI_CASA');
+    $('#g-franja-campo').classList.toggle('oculto', !aplica || $('#g-alcance-sel').value !== 'SOLO_MI_CASA' || !$('#g-requiere').checked);
+  };
+  for (const id of ['#g-tipo', '#g-alcance-sel', '#g-requiere']) $(id).addEventListener('change', alcance);
   const zonas = () => { $('#g-zona').innerHTML = opcionesDe(c.zonas.filter((z) => String(z.unidad_negocio_id) === $('#g-unidad').value), '', 'Selecciona…'); };
   $('#g-unidad').addEventListener('change', zonas); zonas();
   $('#g-buscar').addEventListener('click', async () => {
@@ -266,13 +204,17 @@ function vRegistrar() {
     e.preventDefault();
     const f = e.target; f.classList.add('cargando'); mostrarError($('#g-error'));
     try {
-      const r = await llamar('/api/reportes', { metodo: 'POST', datos: Object.fromEntries(new FormData(f).entries()) });
+      const datos = Object.fromEntries(new FormData(f).entries());
+      if ($('#g-alcance').classList.contains('oculto')) { delete datos.alcance; delete datos.requiere_acceso; delete datos.franja_horaria; }
+      if (!datos.requiere_acceso) delete datos.franja_horaria;
+      const r = await llamar('/api/reportes', { metodo: 'POST', datos });
       $('#g-resultado').innerHTML = `<div class="tarjeta"><div class="aviso aviso-ok"><b>Reporte registrado.</b> Dicte al cliente su número de seguimiento:</div>
         <div class="codigo-grande">${esc(r.numero_seguimiento)}</div>
+        ${r.requiere_acceso ? `<div class="aviso aviso-alerta">Indique al cliente que la cuadrilla necesitará entrar al predio (${esc(r.franja_horaria)}).</div>` : ''}
         <p>${r.agrupado ? `La falla ya estaba registrada: se agrupó en <b class="mono">${esc(r.incidencia)}</b> (${esc(r.criterio)}), que suma ${r.cantidad_reportes} reportes.` : `Se abrió la incidencia <b class="mono">${esc(r.incidencia)}</b>. Plazo de atención: ${r.plazo_horas} h.`}</p>
         <div class="acciones"><button class="btn btn-sec" type="button" id="g-ver">Ver incidencia</button></div></div>`;
       $('#g-ver').addEventListener('click', async () => { const d = await llamar(`/api/incidencias/buscar/${r.incidencia}`); S.sel = d.id; S.filtros = { estado: '' }; abrir('bandeja'); });
-      f.reset(); zonas(); $('#g-padron').innerHTML = '';
+      f.reset(); zonas(); alcance(); $('#g-padron').innerHTML = '';
       $('#g-resultado').scrollIntoView({ behavior: 'smooth' });
     } catch (err) { mostrarError($('#g-error'), err); } finally { f.classList.remove('cargando'); }
   });
@@ -309,18 +251,22 @@ async function cargarTablero() {
   };
   const maxZona = Math.max(1, ...d.por_zona.map((z) => z.reportes));
   const maxCanal = Math.max(1, ...d.por_canal.map((x) => x.reportes));
+  const maxEstrellas = Math.max(1, ...d.satisfaccion.distribucion.map((x) => x.encuestas));
   cont.innerHTML = `
     <p class="muted peq">Periodo: ${fecha(`${d.periodo.desde}T12:00:00Z`, false)} al ${fecha(`${d.periodo.hasta}T12:00:00Z`, false)} · fecha de registro de la incidencia · hora de Lima</p>
     <div class="kpis">
       <div class="kpi"><div class="nombre">KPI 1 · Tiempo medio desde el reporte hasta la solución</div>
         <div class="valor">${k.tiempo_medio_atencion_h == null ? '—' : k.tiempo_medio_atencion_h}<small> h</small></div>
-        <div class="meta muted">Respuesta (hasta "en atención"): ${k.tiempo_medio_respuesta_h ?? '—'} h · la meta se fija con la línea base</div></div>
+        <div class="meta muted">Hasta el restablecimiento. Llegada de la cuadrilla: ${k.tiempo_medio_llegada_h ?? '—'} h · la meta se fija con la línea base</div></div>
       <div class="kpi"><div class="nombre">KPI 2 · Duplicados agrupados automáticamente</div>
         <div class="valor">${k.pct_duplicados_agrupados_auto ?? '—'}<small>%</small></div>
         ${meta(k.pct_duplicados_agrupados_auto, k.meta_duplicados)}</div>
       <div class="kpi"><div class="nombre">KPI 3 · Incidencias atendidas dentro del plazo</div>
         <div class="valor">${k.pct_en_plazo ?? '—'}<small>%</small></div>
         ${meta(k.pct_en_plazo, k.meta_en_plazo)}</div>
+      <div class="kpi"><div class="nombre">Satisfacción del cliente · atención en general (encuesta opcional)</div>
+        <div class="valor">${k.satisfaccion_promedio ?? '—'}<small> / 5 ★</small></div>
+        ${k.pct_satisfechos == null ? '<div class="meta muted">Sin encuestas en el periodo</div>' : `<div class="meta ${k.pct_satisfechos >= k.meta_satisfaccion ? 'cumple' : 'nocumple'}">${icono(k.pct_satisfechos >= k.meta_satisfaccion ? 'ok' : 'x')} ${k.pct_satisfechos}% satisfechos (4 o 5 ★) · meta ≥ ${k.meta_satisfaccion}%</div>`}</div>
       <div class="kpi"><div class="nombre">Incidencias abiertas ahora en el periodo</div>
         <div class="valor">${t.abiertas}</div>
         <div class="meta ${t.vencidas ? 'nocumple' : 'cumple'}">${icono(t.vencidas ? 'x' : 'ok')} ${t.vencidas} vencida(s)</div></div>
@@ -329,8 +275,11 @@ async function cargarTablero() {
       <span><b>${t.reportes}</b> reportes de clientes</span>
       <span><b>${t.incidencias}</b> incidencias</span>
       <span><b>${t.duplicados}</b> duplicados agrupados (${k.pct_reportes_duplicados ?? 0}% de los reportes; ${t.duplicados_auto} automáticos, ${t.duplicados_manual} por fusión manual)</span>
-      <span><b>${t.solucionadas}</b> solucionadas, <b>${t.en_plazo}</b> en plazo</span>
+      <span><b>${t.solucionadas}</b> con servicio restablecido, <b>${t.en_plazo}</b> en plazo</span>
       <span><b>${t.anuladas}</b> anuladas</span>
+      <span><b>${t.por_validar}</b> por validar</span>
+      <span><b>${t.reabiertas}</b> reabiertas por el cliente</span>
+      <span><b>${t.confirmaciones_si}</b> clientes confirmaron que volvió el servicio${t.confirmaciones_no ? `, <b>${t.confirmaciones_no}</b> dijeron que no` : ''}</span>
     </div>
     <div class="graficos">
       <div class="tarjeta"><h3>Atendidas en plazo por semana</h3><p class="muted peq">Porcentaje de incidencias solucionadas dentro del plazo. Línea punteada: meta de 90%.</p><div id="g-tendencia"></div></div>
@@ -343,6 +292,15 @@ async function cargarTablero() {
       <div class="tarjeta"><h3>Reportes por canal</h3>
         <div class="barras">${d.por_canal.map((x) => `<div class="barra-fila" data-tip="${esc(CANALES[x.canal] || x.canal)}: ${x.reportes} reportes"><span class="n">${esc(CANALES[x.canal] || x.canal)}</span><span class="pista"><span class="relleno" data-w="${(100 * x.reportes / maxCanal).toFixed(1)}"></span></span><span class="v">${x.reportes}</span></div>`).join('') || '<p class="muted">Sin datos.</p>'}</div>
         <p class="muted peq mt-s">Los canales Teléfono, Oficina y WhatsApp los registra el personal de Atención al Cliente.</p></div>
+      <div class="tarjeta"><h3>Encuesta de satisfacción</h3>
+        <p class="muted peq">${d.satisfaccion.encuestas} encuesta(s) respondida(s)${d.satisfaccion.pct_respuesta != null ? ` · ${d.satisfaccion.pct_respuesta}% de los clientes con el servicio restablecido` : ''}. Responder es opcional.</p>
+        <p class="peq sin-margen"><b>Atención en general</b></p>
+        <div class="barras">${d.satisfaccion.distribucion.map((x) => `<div class="barra-fila" data-tip="${x.estrellas} estrella(s): ${x.encuestas} encuesta(s)"><span class="n">${'★'.repeat(x.estrellas)}</span><span class="pista"><span class="relleno" data-w="${(100 * x.encuestas / maxEstrellas).toFixed(1)}"></span></span><span class="v">${x.encuestas}</span></div>`).join('')}</div>
+        <p class="mt-s">Rapidez de la atención: <b>${d.satisfaccion.rapidez_promedio ?? '—'}</b> / 5 ★</p></div>
+      <div class="tarjeta"><h3>Satisfacción por cuadrilla</h3><p class="muted peq">Calidad del servicio de cada cuadrilla, propia o contratista, según los clientes que atendió. Cuadrillas con 3 o más encuestas.</p>
+        <div class="tabla-env"><table><thead><tr><th>Cuadrilla</th><th class="num">Encuestas</th><th class="num">Atención</th><th class="num">Rapidez</th><th class="num">Satisfechos</th></tr></thead><tbody>
+        ${d.satisfaccion.por_cuadrilla.filter((c) => c.encuestas >= 3).map((c) => `<tr><td><span class="mono">${esc(c.cuadrilla)}</span><br><span class="muted peq">${esc(c.responsable || '')}</span></td><td class="num">${c.encuestas}</td><td class="num">${c.promedio ?? '—'} ★</td><td class="num">${c.rapidez ?? '—'} ★</td><td class="num ${c.pct_satisfechos != null && c.pct_satisfechos < k.meta_satisfaccion ? 'vencida' : ''}">${c.pct_satisfechos ?? '—'}%</td></tr>`).join('') || '<tr><td colspan="5" class="muted">Sin encuestas suficientes en el periodo.</td></tr>'}
+        </tbody></table></div></div>
     </div>`;
   anchos(cont);
   graficoTendencia($('#g-tendencia'), d.tendencia, k.meta_en_plazo);

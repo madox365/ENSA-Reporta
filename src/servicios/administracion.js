@@ -3,7 +3,7 @@ const db = require('../db');
 const auditoria = require('./auditoria');
 const { iso, hashClave, ErrorNegocio, texto, numero } = require('../util');
 
-const ROLES = ['ADMIN', 'OPERADOR', 'SUPERVISOR', 'GERENCIA'];
+const ROLES = ['ADMIN', 'OPERADOR', 'DESPACHADOR', 'SUPERVISOR', 'JEFE_CUADRILLA', 'GERENCIA'];
 const PRIORIDADES = ['CRITICA', 'ALTA', 'MEDIA', 'BAJA'];
 
 function validarClave(clave) {

@@ -7,6 +7,8 @@ const db = require('../db');
 const { ahora, iso, sumarHoras, horasEntre } = require('../util');
 
 const META_EN_PLAZO = 90;
+// Meta propuesta de satisfacción (porcentaje de clientes que califican con 4 o 5 estrellas)
+const META_SATISFACCION = 80;
 const META_DUPLICADOS = 100;
 
 function rango(f) {
@@ -40,18 +42,40 @@ function calcular(f = {}) {
   if (f.unidad_id) { condR.push('z.unidad_negocio_id = ?'); pR.push(Number(f.unidad_id)); }
   if (f.tipo_id) { condR.push('i.tipo_id = ?'); pR.push(Number(f.tipo_id)); }
   const reps = db.todos(
-    `SELECT r.canal, r.es_duplicado, r.tipo_agrupacion FROM reporte r JOIN incidencia i ON i.id = r.incidencia_id
+    `SELECT r.canal, r.es_duplicado, r.tipo_agrupacion, r.confirmacion, i.estado AS estado_incidencia FROM reporte r JOIN incidencia i ON i.id = r.incidencia_id
        JOIN zona z ON z.id = i.zona_id WHERE ${condR.join(' AND ')}`, ...pR,
   );
 
+  // Encuestas de satisfacción de las incidencias del periodo (mismos filtros)
+  const encuestas = db.todos(
+    `SELECT e.*, c.codigo AS cuadrilla, c.nombre AS cuadrilla_nombre, c.tipo AS cuadrilla_tipo, em.nombre AS empresa
+       FROM encuesta e JOIN incidencia i ON i.id = e.incidencia_id JOIN zona z ON z.id = i.zona_id
+       LEFT JOIN cuadrilla c ON c.id = e.cuadrilla_id LEFT JOIN empresa_contratista em ON em.id = c.empresa_id
+      WHERE ${cond.join(' AND ')}`, ...p,
+  );
+  const promedioDe = (lista, campo) => r1(prom(lista.map((e) => e[campo]).filter((v) => v != null)));
+  const porCuadrilla = new Map();
+  for (const e of encuestas.filter((x) => x.cuadrilla)) {
+    if (!porCuadrilla.has(e.cuadrilla)) {
+      porCuadrilla.set(e.cuadrilla, { cuadrilla: e.cuadrilla, nombre: e.cuadrilla_nombre,
+        responsable: e.cuadrilla_tipo === 'PROPIA' ? 'Propia de ENSA' : e.empresa, lista: [] });
+    }
+    porCuadrilla.get(e.cuadrilla).lista.push(e);
+  }
+
   const ahoraIso = iso();
   const validas = incs.filter((i) => i.estado !== 'ANULADA');
-  const solucionadas = validas.filter((i) => i.estado === 'SOLUCIONADA');
+  // Con servicio restablecido (validado o por validar): el KPI mide lo que vive el cliente
+  const conSolucion = (i) => ['RESTABLECIDA', 'SOLUCIONADA'].includes(i.estado) && i.fecha_solucion;
+  const solucionadas = validas.filter(conSolucion);
+  const porValidar = validas.filter((i) => i.estado === 'RESTABLECIDA');
   const enPlazo = solucionadas.filter((i) => i.fecha_solucion <= i.fecha_limite);
-  const abiertas = validas.filter((i) => ['REGISTRADA', 'ASIGNADA', 'EN_ATENCION'].includes(i.estado));
+  const abiertas = validas.filter((i) => ['REGISTRADA', 'ASIGNADA', 'EN_CAMINO', 'EN_LUGAR', 'REPARANDO'].includes(i.estado));
   const vencidas = abiertas.filter((i) => i.fecha_limite < ahoraIso);
   const tAtencion = solucionadas.map((i) => horasEntre(i.fecha_registro, i.fecha_solucion));
-  const tRespuesta = validas.filter((i) => i.fecha_atencion).map((i) => horasEntre(i.fecha_registro, i.fecha_atencion));
+  // Respuesta: del registro a la emisión de la orden de trabajo. Llegada: del registro a la llegada de la cuadrilla al lugar.
+  const tRespuesta = validas.filter((i) => i.fecha_asignacion).map((i) => horasEntre(i.fecha_registro, i.fecha_asignacion));
+  const tLlegada = validas.filter((i) => i.fecha_atencion).map((i) => horasEntre(i.fecha_registro, i.fecha_atencion));
   const dup = reps.filter((r) => r.es_duplicado);
   const dupAuto = dup.filter((r) => r.tipo_agrupacion === 'AUTOMATICA').length;
 
@@ -63,7 +87,7 @@ function calcular(f = {}) {
       const g = m.get(k);
       g.incidencias++; g.reportes += i.cantidad_reportes;
       if (abiertas.includes(i)) { g.abiertas++; if (i.fecha_limite < ahoraIso) g.vencidas++; }
-      if (i.estado === 'SOLUCIONADA') { g.sol++; if (i.fecha_solucion <= i.fecha_limite) g.plazo++; g.horas.push(horasEntre(i.fecha_registro, i.fecha_solucion)); }
+      if (conSolucion(i)) { g.sol++; if (i.fecha_solucion <= i.fecha_limite) g.plazo++; g.horas.push(horasEntre(i.fecha_registro, i.fecha_solucion)); }
     }
     return [...m.values()]
       .map((g) => ({ nombre: g.nombre, unidad: g.unidad, incidencias: g.incidencias, reportes: g.reportes, abiertas: g.abiertas, vencidas: g.vencidas, pct_en_plazo: r1(pct(g.plazo, g.sol)), tiempo_medio_h: r1(prom(g.horas)) }))
@@ -79,7 +103,7 @@ function calcular(f = {}) {
     if (!semanas.has(lunes)) semanas.set(lunes, { semana: lunes, incidencias: 0, sol: 0, plazo: 0, horas: [] });
     const s = semanas.get(lunes);
     s.incidencias++;
-    if (i.estado === 'SOLUCIONADA') { s.sol++; if (i.fecha_solucion <= i.fecha_limite) s.plazo++; s.horas.push(horasEntre(i.fecha_registro, i.fecha_solucion)); }
+    if (conSolucion(i)) { s.sol++; if (i.fecha_solucion <= i.fecha_limite) s.plazo++; s.horas.push(horasEntre(i.fecha_registro, i.fecha_solucion)); }
   }
   const canales = {};
   for (const r of reps) canales[r.canal] = (canales[r.canal] || 0) + 1;
@@ -89,11 +113,28 @@ function calcular(f = {}) {
     kpi: {
       tiempo_medio_atencion_h: r1(prom(tAtencion)),
       tiempo_medio_respuesta_h: r1(prom(tRespuesta)),
+      tiempo_medio_llegada_h: r1(prom(tLlegada)),
+      pct_confirmado_cliente: r1(pct(reps.filter((r) => r.confirmacion === 'SI').length, reps.filter((r) => r.confirmacion).length)),
       pct_en_plazo: r1(pct(enPlazo.length, solucionadas.length)),
       meta_en_plazo: META_EN_PLAZO,
       pct_duplicados_agrupados_auto: r1(pct(dupAuto, dup.length)),
       meta_duplicados: META_DUPLICADOS,
       pct_reportes_duplicados: r1(pct(dup.length, reps.length)),
+      satisfaccion_promedio: promedioDe(encuestas, 'general'),
+      pct_satisfechos: r1(pct(encuestas.filter((e) => e.general >= 4).length, encuestas.filter((e) => e.general != null).length)),
+      meta_satisfaccion: META_SATISFACCION,
+    },
+    satisfaccion: {
+      encuestas: encuestas.length,
+      // Tasa de respuesta: encuestas sobre reportes de incidencias con el servicio restablecido
+      pct_respuesta: r1(pct(encuestas.length, reps.filter((r) => ['RESTABLECIDA', 'SOLUCIONADA'].includes(r.estado_incidencia)).length)),
+      distribucion: [5, 4, 3, 2, 1].map((n) => ({ estrellas: n, encuestas: encuestas.filter((e) => e.general === n).length })),
+      rapidez_promedio: promedioDe(encuestas, 'rapidez'),
+      por_cuadrilla: [...porCuadrilla.values()]
+        .map((g) => ({ cuadrilla: g.cuadrilla, nombre: g.nombre, responsable: g.responsable, encuestas: g.lista.length,
+          promedio: promedioDe(g.lista, 'general'), rapidez: promedioDe(g.lista, 'rapidez'),
+          pct_satisfechos: r1(pct(g.lista.filter((e) => e.general >= 4).length, g.lista.filter((e) => e.general != null).length)) }))
+        .sort((a, b) => b.encuestas - a.encuestas),
     },
     totales: {
       reportes: reps.length,
@@ -106,6 +147,10 @@ function calcular(f = {}) {
       abiertas: abiertas.length,
       vencidas: vencidas.length,
       anuladas: incs.length - validas.length,
+      por_validar: porValidar.length,
+      reabiertas: validas.filter((i) => i.reaperturas > 0).length,
+      confirmaciones_si: reps.filter((r) => r.confirmacion === 'SI').length,
+      confirmaciones_no: reps.filter((r) => r.confirmacion === 'NO').length,
     },
     por_zona: agrupar('zona'),
     por_tipo: agrupar('tipo'),
@@ -120,13 +165,14 @@ function csv(f = {}) {
   const { desdeIso, hastaIso } = rango(f);
   const filas = db.todos(
     `SELECT i.codigo, t.nombre AS tipo, u.nombre AS unidad, z.nombre AS zona, i.direccion, i.estado, i.prioridad, a.nombre AS area,
-            i.cuadrilla, i.cantidad_reportes, i.fecha_registro, i.fecha_limite, i.fecha_asignacion, i.fecha_atencion, i.fecha_solucion
+            (SELECT c.codigo FROM orden_trabajo ot JOIN cuadrilla c ON c.id = ot.cuadrilla_id WHERE ot.id = i.orden_actual_id) AS cuadrilla, i.cantidad_reportes, i.fecha_registro, i.fecha_limite, i.fecha_asignacion, i.fecha_atencion, i.fecha_solucion,
+            (SELECT ROUND(AVG(e.general), 1) FROM encuesta e WHERE e.incidencia_id = i.id) AS satisfaccion
        FROM incidencia i JOIN tipo_incidencia t ON t.id = i.tipo_id JOIN zona z ON z.id = i.zona_id
        JOIN unidad_negocio u ON u.id = z.unidad_negocio_id JOIN area a ON a.id = i.area_id
       WHERE i.fecha_registro >= ? AND i.fecha_registro < ? ORDER BY i.fecha_registro`, desdeIso, hastaIso,
   );
   const cab = ['codigo', 'tipo', 'unidad', 'zona', 'direccion', 'estado', 'prioridad', 'area', 'cuadrilla', 'reportes',
-    'fecha_registro', 'fecha_limite', 'fecha_asignacion', 'fecha_atencion', 'fecha_solucion', 'horas_atencion', 'en_plazo'];
+    'fecha_registro', 'fecha_limite', 'fecha_asignacion', 'fecha_atencion', 'fecha_solucion', 'horas_atencion', 'en_plazo', 'satisfaccion'];
   const esc = (v) => {
     if (v == null) return '';
     let s = String(v);
@@ -138,8 +184,9 @@ function csv(f = {}) {
     r.fecha_registro, r.fecha_limite, r.fecha_asignacion, r.fecha_atencion, r.fecha_solucion,
     r.fecha_solucion ? r1(horasEntre(r.fecha_registro, r.fecha_solucion)) : '',
     r.fecha_solucion ? (r.fecha_solucion <= r.fecha_limite ? 'SI' : 'NO') : '',
+    r.satisfaccion,
   ].map(esc).join(';'));
   return `﻿${cab.join(';')}\n${lineas.join('\n')}\n`;
 }
 
-module.exports = { calcular, csv, META_EN_PLAZO, META_DUPLICADOS };
+module.exports = { calcular, csv, META_EN_PLAZO, META_DUPLICADOS, META_SATISFACCION };

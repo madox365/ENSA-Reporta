@@ -5,7 +5,7 @@
 //   - Correo: Office 365 por SMTP autenticado (smtp.office365.com:587).
 const db = require('../db');
 const config = require('../config');
-const { iso } = require('../util');
+const { iso, horaLima } = require('../util');
 
 const adaptadores = {
   registro: { sms: async () => true, email: async () => true },
@@ -39,8 +39,12 @@ const mensajes = {
     `ENSA: Recibimos tu reporte ${rep.codigo}.` +
     (agrupado ? ` Ya atendemos esta falla (${inc.codigo}); tu reporte se sumó a ella.` : '') +
     ' Consulta el estado en ensa-reporta con tu número de seguimiento.',
-  solucion: (rep, inc) =>
-    `ENSA: La falla de tu reporte ${rep.codigo} (${inc.codigo}) fue solucionada. Si el problema continúa, repórtalo de nuevo. Gracias.`,
+  enCamino: (rep, cuadrilla, eta) =>
+    `ENSA: La cuadrilla ${cuadrilla.codigo} va en camino para atender tu reporte ${rep.codigo}. Llegada estimada: ${horaLima(eta)}.`
+    + (rep.requiere_acceso ? ' Por favor, que alguien esté en el predio.' : ' No necesitas estar presente.'),
+  restablecido: (rep, causa) => (causa.responsabilidad === 'CLIENTE'
+    ? `ENSA: Revisamos tu reporte ${rep.codigo}. La red de ENSA funciona bien; la falla está en la instalación interna del predio. Te recomendamos llamar a un electricista.`
+    : `ENSA: Restablecimos el servicio de tu reporte ${rep.codigo}. ¿Volvió tu luz? Respóndenos al consultar tu reporte. Gracias.`),
   anulacion: (rep, motivo) =>
     `ENSA: Tu reporte ${rep.codigo} fue cerrado: ${motivo}. Para consultas llama al ${config.telefonoEmergencias}.`,
 };

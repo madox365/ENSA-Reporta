@@ -1,7 +1,8 @@
 'use strict';
 // Ingreso del cliente con su número de suministro (el código del recibo de luz).
-// Piloto: suministro + DNI/RUC del titular, validados contra el padrón exportado de Optimus NGC.
-// Producción: se agrega un código de un solo uso por SMS (Mensajes Ensa) al celular registrado.
+// Basta el número de suministro: con él se cargan del padrón (exportado de Optimus NGC) el titular,
+// la dirección, la zona, la ubicación y el celular registrado. El número figura en el recibo de luz.
+// Para frenar a quien pruebe números al azar: límite de intentos por IP (ruta) y por número.
 const crypto = require('node:crypto');
 const db = require('../db');
 const auditoria = require('./auditoria');
@@ -15,20 +16,19 @@ function enmascararNombre(n) {
   return String(n).split(/\s+/).map((p, i) => (i === 0 ? p : `${p[0]}.`)).join(' ');
 }
 
-function ingresar(numero, documento, ip) {
+function ingresar(numero, ip) {
   const num = texto(numero, 15).replace(/\D/g, '');
-  const doc = texto(documento, 12).replace(/\s/g, '').toUpperCase();
-  if (!num || !doc) throw new ErrorNegocio('Ingresa tu número de suministro y el DNI del titular.');
+  if (!num) throw new ErrorNegocio('Ingresa tu número de suministro.');
   const f = fallos.get(num);
   if (f && f.hasta > Date.now()) throw new ErrorNegocio(`Demasiados intentos. Intenta nuevamente en ${BLOQUEO_MIN} minutos.`, 429);
   const s = db.uno('SELECT * FROM suministro WHERE numero = ?', num);
-  if (!s || s.documento.toUpperCase() !== doc) {
+  if (!s) {
     const reg = !f || (f.hasta && f.hasta <= Date.now()) ? { n: 0, hasta: 0 } : f;
     reg.n++;
     if (reg.n >= MAX_FALLOS) { reg.hasta = Date.now() + BLOQUEO_MIN * 60e3; reg.n = 0; }
     fallos.set(num, reg);
     auditoria.registrar({ accion: 'CLIENTE_INGRESO_FALLIDO', detalle: num, ip });
-    throw new ErrorNegocio('El número de suministro o el DNI del titular no coinciden.', 401);
+    throw new ErrorNegocio('No encontramos ese número de suministro. Revísalo en tu recibo de luz.', 401);
   }
   fallos.delete(num);
   const token = crypto.randomBytes(24).toString('hex');

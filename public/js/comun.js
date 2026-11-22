@@ -41,7 +41,8 @@ function duracion(horas) {
   if (h < 48) return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')} min`;
   return `${Math.round(h / 24 * 10) / 10} días`;
 }
-const ESTADOS = { REGISTRADA: 'Registrada', ASIGNADA: 'Asignada', EN_ATENCION: 'En atención', SOLUCIONADA: 'Solucionada', ANULADA: 'Anulada' };
+const ESTADOS = { REGISTRADA: 'Registrada', ASIGNADA: 'Cuadrilla asignada', EN_CAMINO: 'En camino', EN_LUGAR: 'En el lugar', REPARANDO: 'Reparando', RESTABLECIDA: 'Restablecida', SOLUCIONADA: 'Solucionada', ANULADA: 'Anulada', VALIDADA: 'Validada', CANCELADA: 'Cancelada', RECHAZADA: 'Rechazada', DISPONIBLE: 'Disponible', EN_SERVICIO: 'En servicio', FUERA_DE_TURNO: 'Fuera de turno', INACTIVA: 'Inactiva' };
+const ABIERTOS = ['REGISTRADA', 'ASIGNADA', 'EN_CAMINO', 'EN_LUGAR', 'REPARANDO'];
 const CANALES = { WEB: 'Web', APP: 'App', TELEFONO: 'Teléfono', OFICINA: 'Oficina', WHATSAPP: 'WhatsApp' };
 const chipEstado = (e) => `<span class="estado e-${esc(e)}">${esc(ESTADOS[e] || e)}</span>`;
 
@@ -67,6 +68,10 @@ const ICONOS = {
   usuarios: '<circle cx="9" cy="8" r="3.5"/><path d="M2 20a7 7 0 0 1 14 0"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M22 20a7 7 0 0 0-4-6.3"/>',
   escudo: '<path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
   salir: '<path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10"/>',
+  camion: '<path d="M3 7h11v9H3zM14 10h4l3 3v3h-7"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/>',
+  mapa: '<path d="M12 21s-7-6.2-7-11a7 7 0 0 1 14 0c0 4.8-7 11-7 11z"/><circle cx="12" cy="10" r="2.5"/>',
+  reloj: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  herramienta: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
   telefono: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2"/>',
 };
 function icono(nombre, clase = 'i') {

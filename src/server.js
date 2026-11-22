@@ -4,7 +4,22 @@ const db = require('./db');
 const { crearApp } = require('./app');
 const { sembrarCatalogo, sembrarDemo } = require('./seed');
 
-db.abrir(config.rutaBD);
+const fs = require('node:fs');
+try {
+  db.abrir(config.rutaBD);
+} catch (e) {
+  if (e.code !== 'ESQUEMA_ANTIGUO') throw e;
+  if (!config.demo) {
+    console.error('La base de datos es de una versión anterior. Migre los datos (ver manual de instalación) o use otra ruta en DB_PATH.');
+    process.exit(1);
+  }
+  // En demostración se guarda la base anterior y se crea una nueva con datos de prueba
+  const respaldo = `${config.rutaBD}.anterior-${Date.now()}`;
+  fs.renameSync(config.rutaBD, respaldo);
+  for (const ext of ['-wal', '-shm']) fs.rmSync(config.rutaBD + ext, { force: true });
+  console.log(`Base de demostración anterior guardada como ${respaldo}. Se crea una nueva.`);
+  db.abrir(config.rutaBD);
+}
 sembrarCatalogo();
 if (config.demo) sembrarDemo();
 

@@ -11,7 +11,14 @@ const {
   ErrorNegocio, texto, opcional, numero,
 } = require('../util');
 
-const ABIERTOS = ['REGISTRADA', 'ASIGNADA', 'EN_ATENCION'];
+// Estados en los que la falla sigue sin resolverse
+const ABIERTOS = ['REGISTRADA', 'ASIGNADA', 'EN_CAMINO', 'EN_LUGAR', 'REPARANDO'];
+const SQL_ABIERTOS = ABIERTOS.map((e) => `'${e}'`).join(',');
+// Con el servicio restablecido (validado o por validar por el supervisor)
+const CON_SOLUCION = ['RESTABLECIDA', 'SOLUCIONADA'];
+const ALCANCES = ['SOLO_MI_CASA', 'VARIAS_CASAS', 'NO_SE'];
+const FRANJAS = ['AHORA', 'HOY_TARDE', 'HOY_NOCHE', 'MANANA_MANANA', 'MANANA_TARDE'];
+const FRANJAS_TEXTO = { AHORA: 'Ahora mismo', HOY_TARDE: 'Hoy en la tarde (14:00-18:00)', HOY_NOCHE: 'Hoy en la noche (18:00-21:00)', MANANA_MANANA: 'Mañana en la mañana (8:00-12:00)', MANANA_TARDE: 'Mañana en la tarde (14:00-18:00)' };
 const CANALES = ['WEB', 'APP', 'TELEFONO', 'OFICINA', 'WHATSAPP'];
 const UMBRAL_DIRECCION = 0.5;
 const TIPOS_POR_SED = ['CORTE', 'TENSION'];
@@ -25,6 +32,9 @@ function catalogo() {
     tipos: db.todos(`SELECT t.*, a.nombre AS area FROM tipo_incidencia t JOIN area a ON a.id = t.area_id
                      WHERE t.activo = 1 ORDER BY t.id`),
     areas: db.todos('SELECT * FROM area ORDER BY id'),
+    causas: db.todos('SELECT * FROM causa ORDER BY id'),
+    empresas: db.todos('SELECT * FROM empresa_contratista WHERE activo = 1 ORDER BY nombre'),
+    franjas: Object.entries(FRANJAS_TEXTO).map(([codigo, nombre]) => ({ codigo, nombre })),
   };
 }
 
@@ -58,11 +68,24 @@ function validarReporte(d, canal) {
       errores.push('Debes aceptar el tratamiento de tus datos personales para registrar el reporte.');
     }
   }
+  // ¿A quién afecta? Solo para fallas que pueden ser de un suministro (corte de luz, luz baja)
+  let alcance = null, requiereAcceso = 0, franja = null;
+  if (tipo && TIPOS_POR_SED.includes(tipo.codigo)) {
+    alcance = ALCANCES.includes(d.alcance) ? d.alcance : null;
+    if (alcance === 'SOLO_MI_CASA') {
+      requiereAcceso = d.requiere_acceso === true || d.requiere_acceso === 'true' || d.requiere_acceso === 1 || d.requiere_acceso === '1' ? 1 : 0;
+      if (requiereAcceso) {
+        franja = FRANJAS.includes(d.franja_horaria) ? d.franja_horaria : null;
+        if (!franja) errores.push('Indica en qué horario podrá estar alguien en el predio.');
+      }
+    }
+  }
   if (errores.length) throw new ErrorNegocio(errores.join(' '));
   return {
     tipo, zona, direccion, nombre, telefono, documento, email, suministro, lat, lng,
     referencia: opcional(d.referencia, 200),
     descripcion: opcional(d.descripcion, 500),
+    alcance, requiereAcceso, franja,
   };
 }
 
@@ -81,25 +104,43 @@ function guardarFoto(dataUrl) {
   return nombre;
 }
 
+// Borra una foto recién guardada cuando la operación que la usaba no se completó
+function borrarFoto(nombre) {
+  if (!nombre || !/^[0-9a-f-]{36}\.(jpg|png|webp)$/.test(nombre)) return;
+  try { fs.unlinkSync(path.join(config.rutaFotos, nombre)); } catch { /* ya no existe */ }
+}
+
 // ---------------------------------------------------------------- agrupación de duplicados
 // Busca una incidencia abierta del mismo tipo y zona, dentro de la ventana de tiempo del tipo,
 // que coincida por ubicación (radio), por número de suministro o por dirección parecida.
 function buscarCoincidencia(tipo, zona, d, fecha) {
   const desde = sumarHoras(fecha, -tipo.ventana_agrupacion_h);
   const candidatas = db.todos(
-    `SELECT * FROM incidencia WHERE tipo_id = ? AND zona_id = ? AND estado IN ('REGISTRADA','ASIGNADA','EN_ATENCION')
+    `SELECT * FROM incidencia WHERE tipo_id = ? AND zona_id = ? AND estado IN (${SQL_ABIERTOS})
        AND fecha_registro >= ? ORDER BY fecha_registro DESC`,
     tipo.id, zona.id, desde,
   );
   if (!candidatas.length) return null;
+  // Si el cliente dice que la falla es solo de su casa, solo se agrupa con otro reporte del mismo suministro
+  if (d.alcance === 'SOLO_MI_CASA') {
+    if (!d.suministro) return null;
+    for (const inc of candidatas) {
+      if (db.uno('SELECT 1 FROM reporte WHERE incidencia_id = ? AND suministro = ?', inc.id, d.suministro)) {
+        return { incidencia: inc, criterio: 'mismo suministro', puntaje: 1.5 };
+      }
+    }
+    return null;
+  }
   if (tipo.radio_agrupacion_m == null) {
     return { incidencia: candidatas[0], criterio: 'misma zona' };
   }
   let mejor = null;
   for (const inc of candidatas) {
-    const reps = db.todos('SELECT direccion, referencia, suministro, sed, lat, lng FROM reporte WHERE incidencia_id = ?', inc.id);
+    const reps = db.todos('SELECT direccion, referencia, suministro, sed, lat, lng, alcance FROM reporte WHERE incidencia_id = ?', inc.id);
     for (const r of reps) {
       let puntaje = 0, criterio = null;
+      // Una falla que el cliente declaró "solo en mi casa" no absorbe reportes de otros suministros
+      if (r.alcance === 'SOLO_MI_CASA' && !(d.suministro && r.suministro === d.suministro)) continue;
       // Cortes y variaciones de tensión: clientes de la misma subestación sufren la misma falla
       if (TIPOS_POR_SED.includes(tipo.codigo) && d.sed && r.sed && d.sed === r.sed) { puntaje = 2.5; criterio = `misma subestación ${d.sed}`; }
       if (!criterio && d.lat != null && r.lat != null) {
@@ -167,11 +208,12 @@ function registrarReporte(datosEntrada, { canal = 'WEB', usuarioId = null, ip = 
     const codigoRep = `RP-${anio}-${String(db.siguiente(`RP-${anio}`)).padStart(6, '0')}`;
     const r = db.ejecutar(
       `INSERT INTO reporte (codigo, incidencia_id, canal, nombre, documento, telefono, email, suministro, sed, autenticado, direccion,
-         referencia, lat, lng, descripcion, foto, es_duplicado, tipo_agrupacion, consentimiento, registrado_por, fecha)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
+         referencia, lat, lng, descripcion, foto, es_duplicado, tipo_agrupacion, alcance, requiere_acceso, franja_horaria,
+         consentimiento, registrado_por, fecha)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`,
       codigoRep, inc.id, canal, d.nombre, d.documento, d.telefono, d.email, d.suministro, d.sed, d.autenticado, d.direccion,
       d.referencia, d.lat, d.lng, d.descripcion, foto, coincidencia ? 1 : 0, coincidencia ? 'AUTOMATICA' : null,
-      usuarioId, fecha,
+      d.alcance, d.requiereAcceso, d.franja, usuarioId, fecha,
     );
     db.ejecutar('UPDATE incidencia SET cantidad_reportes = cantidad_reportes + 1 WHERE id = ?', inc.id);
     if (coincidencia) {
@@ -196,13 +238,15 @@ function registrarReporte(datosEntrada, { canal = 'WEB', usuarioId = null, ip = 
       estado: inc.estado,
       tipo: d.tipo.nombre,
       plazo_horas: d.tipo.plazo_horas,
+      requiere_acceso: !!d.requiereAcceso,
+      franja_horaria: d.franja ? FRANJAS_TEXTO[d.franja] : null,
     };
   });
   return resultado;
 }
 
-// ---------------------------------------------------------------- consulta pública
-function consultaPublica(codigo, ultimos, cliente = null) {
+// ---------------------------------------------------------------- consulta pública (seguimiento estilo courier)
+function reporteParaCliente(codigo, ultimos, cliente) {
   const c = texto(codigo, 30).toUpperCase();
   const u = texto(ultimos, 4).replace(/\D/g, '');
   const rep = c ? db.uno('SELECT * FROM reporte WHERE codigo = ?', c) : null;
@@ -213,40 +257,200 @@ function consultaPublica(codigo, ultimos, cliente = null) {
     // Mismo mensaje si no existe o si el celular no coincide: no revela qué códigos existen
     if (!rep || !String(rep.telefono).endsWith(u)) throw new ErrorNegocio('No encontramos un reporte con esos datos.', 404);
   }
-  let inc = db.uno('SELECT * FROM incidencia WHERE id = ?', rep.incidencia_id);
-  const tipo = db.uno('SELECT nombre FROM tipo_incidencia WHERE id = ?', inc.tipo_id);
+  return rep;
+}
+
+const HORAS_PARA_CONFIRMAR = 72;
+// Una respuesta solo vale para el restablecimiento actual: si la incidencia se reabrió y se volvió a restablecer,
+// la respuesta anterior ya no cuenta y el cliente puede responder de nuevo.
+function confirmacionVigente(rep, inc) {
+  if (!rep.confirmacion) return null;
+  if (!inc.fecha_solucion) return rep.confirmacion;
+  return rep.fecha_confirmacion >= inc.fecha_solucion ? rep.confirmacion : null;
+}
+
+// Causa con la que la cuadrilla cerró la orden vigente (null si aún no hay cierre)
+function causaDelCierre(inc) {
+  if (!inc.orden_actual_id || !CON_SOLUCION.includes(inc.estado)) return null;
+  return db.uno(`SELECT ca.id, ca.nombre, ca.responsabilidad FROM orden_trabajo ot JOIN causa ca ON ca.id = ot.causa_id
+                  WHERE ot.id = ? AND ot.estado <> 'CANCELADA'`, inc.orden_actual_id) || null;
+}
+
+function puedeConfirmar(rep, inc) {
+  if (confirmacionVigente(rep, inc) || !CON_SOLUCION.includes(inc.estado) || !inc.fecha_solucion) return false;
+  if (horasEntre(inc.fecha_solucion, iso()) > HORAS_PARA_CONFIRMAR) return false;
+  // Si la falla estaba en la instalación interna del cliente, ENSA no vuelve a atenderla: no se pregunta "¿Volvió tu luz?"
+  const causa = causaDelCierre(inc);
+  return !(causa && causa.responsabilidad === 'CLIENTE');
+}
+
+// Encuesta de satisfacción, totalmente opcional: se ofrece cuando el servicio fue restablecido, después de la
+// pregunta "¿Volvió tu luz?" (o cuando no corresponde hacerla), una sola vez por reporte y hasta 7 días después.
+// El cliente puede ignorarla o cerrarla; si la envía, califica la atención en general, la rapidez o ambas.
+const DIAS_PARA_ENCUESTA = 7;
+function encuestaDe(rep) {
+  return db.uno('SELECT general, rapidez, fecha FROM encuesta WHERE reporte_id = ?', rep.id) || null;
+}
+function puedeEncuestar(rep, inc) {
+  if (!CON_SOLUCION.includes(inc.estado) || !inc.fecha_solucion) return false;
+  if (horasEntre(inc.fecha_solucion, iso()) > DIAS_PARA_ENCUESTA * 24) return false;
+  if (confirmacionVigente(rep, inc) === 'NO' || puedeConfirmar(rep, inc)) return false;
+  return !encuestaDe(rep);
+}
+
+function consultaPublica(codigo, ultimos, cliente = null) {
+  const rep = reporteParaCliente(codigo, ultimos, cliente);
+  const inc = db.uno('SELECT * FROM incidencia WHERE id = ?', rep.incidencia_id);
+  const tipo = db.uno('SELECT nombre, codigo FROM tipo_incidencia WHERE id = ?', inc.tipo_id);
   const zona = db.uno('SELECT nombre FROM zona WHERE id = ?', inc.zona_id);
   const area = db.uno('SELECT nombre FROM area WHERE id = ?', inc.area_id);
   const linea = db.todos(
     `SELECT estado_nuevo AS estado, fecha FROM historial WHERE incidencia_id = ? AND (estado_anterior IS NULL OR estado_anterior <> estado_nuevo)
       ORDER BY fecha, id`, inc.id,
   );
+  // Datos de la cuadrilla: código, si es propia o de qué contratista, y hora estimada. Nunca su ubicación.
+  let cuadrilla = null, causa = null;
+  const ot = inc.orden_actual_id ? db.uno('SELECT * FROM orden_trabajo WHERE id = ?', inc.orden_actual_id) : null;
+  if (ot && ot.estado !== 'CANCELADA') {
+    const cu = db.uno(`SELECT c.codigo, c.nombre, c.tipo, e.nombre AS empresa FROM cuadrilla c
+                        LEFT JOIN empresa_contratista e ON e.id = c.empresa_id WHERE c.id = ?`, ot.cuadrilla_id);
+    cuadrilla = {
+      codigo: cu.codigo, nombre: cu.nombre,
+      responsable: cu.tipo === 'PROPIA' ? 'Personal de ENSA' : `Contratista de ENSA: ${cu.empresa}`,
+      orden_trabajo: ot.codigo,
+      hora_estimada_llegada: ot.estado === 'EN_CAMINO' ? ot.eta : null,
+      llegada: ot.fecha_llegada,
+    };
+    if (ot.causa_id && CON_SOLUCION.includes(inc.estado)) {
+      const ca = db.uno('SELECT nombre, responsabilidad FROM causa WHERE id = ?', ot.causa_id);
+      causa = { nombre: ca.nombre, responsabilidad: ca.responsabilidad };
+    }
+  }
   return {
     numero_seguimiento: rep.codigo,
     fecha_reporte: rep.fecha,
     incidencia: inc.codigo,
     tipo: tipo.nombre,
+    tipo_codigo: tipo.codigo,
     zona: zona.nombre,
     estado: inc.estado,
     area: area.nombre,
     reportes_de_la_falla: inc.cantidad_reportes,
     fecha_limite: inc.fecha_limite,
     fecha_solucion: inc.fecha_solucion,
-    detalle_solucion: inc.estado === 'SOLUCIONADA' ? inc.detalle_solucion : null,
+    detalle_solucion: CON_SOLUCION.includes(inc.estado) ? inc.detalle_solucion : null,
+    causa,
+    cuadrilla,
+    requiere_presencia: !!rep.requiere_acceso,
+    franja_horaria: rep.franja_horaria ? FRANJAS_TEXTO[rep.franja_horaria] : null,
+    confirmacion: confirmacionVigente(rep, inc),
+    puede_confirmar: puedeConfirmar(rep, inc),
+    puede_encuestar: puedeEncuestar(rep, inc),
+    encuesta: encuestaDe(rep) ? { general: encuestaDe(rep).general, rapidez: encuestaDe(rep).rapidez } : null,
+    reabierta: inc.reaperturas > 0,
     linea_tiempo: linea,
   };
+}
+
+// Saca el reporte de una falla ya restablecida para los vecinos y abre con él una incidencia nueva solo para su predio.
+function separarReporte(rep, inc, fecha) {
+  const tipo = db.uno('SELECT * FROM tipo_incidencia WHERE id = ?', inc.tipo_id);
+  const anio = new Date(fecha).getUTCFullYear();
+  const codigo = `INC-${anio}-${String(db.siguiente(`INC-${anio}`)).padStart(6, '0')}`;
+  const zonaId = (rep.suministro && (db.uno('SELECT zona_id FROM suministro WHERE numero = ?', rep.suministro) || {}).zona_id) || inc.zona_id;
+  const r = db.ejecutar(
+    `INSERT INTO incidencia (codigo, tipo_id, zona_id, direccion, lat, lng, estado, prioridad, area_id,
+       fecha_registro, fecha_limite, cantidad_reportes) VALUES (?,?,?,?,?,?,'REGISTRADA',?,?,?,?,1)`,
+    codigo, inc.tipo_id, zonaId, rep.direccion + (rep.referencia ? ` (${rep.referencia})` : ''), rep.lat ?? inc.lat, rep.lng ?? inc.lng,
+    tipo.prioridad, inc.area_id, fecha, sumarHoras(fecha, tipo.plazo_horas),
+  );
+  const nueva = db.uno('SELECT * FROM incidencia WHERE id = ?', Number(r.lastInsertRowid));
+  // El reporte pasa a la nueva incidencia como falla de una sola casa; su respuesta "No" queda en el historial
+  db.ejecutar(`UPDATE reporte SET incidencia_id = ?, alcance = 'SOLO_MI_CASA', es_duplicado = 0, tipo_agrupacion = NULL,
+                 confirmacion = NULL, fecha_confirmacion = NULL WHERE id = ?`, nueva.id, rep.id);
+  db.ejecutar('UPDATE incidencia SET cantidad_reportes = cantidad_reportes - 1 WHERE id = ?', inc.id);
+  db.ejecutar('INSERT INTO historial (incidencia_id, estado_anterior, estado_nuevo, comentario, usuario_id, fecha) VALUES (?,?,?,?,?,?)',
+    nueva.id, null, 'REGISTRADA', `El cliente del reporte ${rep.codigo} indicó que sigue sin luz después de restablecida la incidencia ${inc.codigo}, que otros vecinos confirmaron. Se atiende solo su predio.`, null, fecha);
+  db.ejecutar('INSERT INTO historial (incidencia_id, estado_anterior, estado_nuevo, comentario, usuario_id, fecha) VALUES (?,?,?,?,?,?)',
+    inc.id, inc.estado, inc.estado, `El cliente del reporte ${rep.codigo} sigue sin luz; otros vecinos confirmaron el servicio. Su falla pasa a la incidencia ${codigo}.`, null, fecha);
+  return nueva;
+}
+
+// El cliente responde "¿Volvió tu luz?". Un "No" reabre la incidencia y la devuelve al despacho.
+function confirmar(codigo, ultimos, cliente, respuesta, ip = null) {
+  const resp = String(respuesta || '').toUpperCase();
+  if (!['SI', 'NO'].includes(resp)) throw new ErrorNegocio('Respuesta no válida.');
+  return db.transaccion(() => {
+    const rep = reporteParaCliente(codigo, ultimos, cliente);
+    const inc = db.uno('SELECT * FROM incidencia WHERE id = ?', rep.incidencia_id);
+    if (!puedeConfirmar(rep, inc)) throw new ErrorNegocio('Este reporte ya no admite confirmación.', 409);
+    const fecha = iso();
+    db.ejecutar('UPDATE reporte SET confirmacion = ?, fecha_confirmacion = ? WHERE id = ?', resp, fecha, rep.id);
+    let separada = null;
+    if (resp === 'NO') {
+      // ¿Otros vecinos de la misma falla ya confirmaron que volvió la luz en este restablecimiento?
+      const otrosSi = db.todos("SELECT * FROM reporte WHERE incidencia_id = ? AND id <> ? AND confirmacion = 'SI'", inc.id, rep.id)
+        .filter((o) => confirmacionVigente(o, inc) === 'SI').length;
+      if (otrosSi > 0) {
+        // La red ya funciona para los demás: la falla de este cliente es solo de su predio. La incidencia general
+        // sigue cerrada y se abre una incidencia nueva, solo para este suministro.
+        separada = separarReporte(rep, inc, fecha);
+      } else {
+        // La orden vigente queda rechazada por el cliente; la incidencia vuelve al despacho conservando su plazo original
+        if (inc.orden_actual_id) {
+          db.ejecutar("UPDATE orden_trabajo SET estado = 'RECHAZADA', observacion = ? WHERE id = ? AND estado IN ('RESTABLECIDA','VALIDADA')",
+            `El cliente ${rep.codigo} indicó que la falla continúa`, inc.orden_actual_id);
+        }
+        db.ejecutar(`UPDATE incidencia SET estado = 'REGISTRADA', fecha_solucion = NULL, fecha_validacion = NULL, detalle_solucion = NULL,
+                     orden_actual_id = NULL, reaperturas = reaperturas + 1 WHERE id = ?`, inc.id);
+        db.ejecutar('INSERT INTO historial (incidencia_id, estado_anterior, estado_nuevo, comentario, usuario_id, fecha) VALUES (?,?,?,?,?,?)',
+          inc.id, inc.estado, 'REGISTRADA', `Reabierta: el cliente del reporte ${rep.codigo} indicó que la falla continúa`, null, fecha);
+      }
+    } else {
+      db.ejecutar('INSERT INTO historial (incidencia_id, estado_anterior, estado_nuevo, comentario, usuario_id, fecha) VALUES (?,?,?,?,?,?)',
+        inc.id, inc.estado, inc.estado, `El cliente del reporte ${rep.codigo} confirmó que volvió el servicio`, null, fecha);
+    }
+    auditoria.registrar({ accion: resp === 'SI' ? 'CLIENTE_CONFIRMA' : separada ? 'CLIENTE_FALLA_PROPIA' : 'CLIENTE_REABRE', entidad: 'incidencia', entidadId: inc.id,
+      detalle: `${rep.codigo} → ${separada ? separada.codigo : inc.codigo}`, ip });
+    return consultaPublica(rep.codigo, String(rep.telefono).slice(-4), null);
+  });
+}
+
+function responderEncuesta(codigo, ultimos, cliente, datos = {}, ip = null) {
+  const estrella = (v) => {
+    if (v == null || v === '') return null;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > 5) throw new ErrorNegocio('La calificación debe ser de 1 a 5 estrellas.');
+    return n;
+  };
+  const general = estrella(datos.general);
+  const rapidez = estrella(datos.rapidez);
+  if (general == null && rapidez == null) throw new ErrorNegocio('Marca al menos una calificación, o cierra la encuesta si no deseas responderla.');
+  return db.transaccion(() => {
+    const rep = reporteParaCliente(codigo, ultimos, cliente);
+    const inc = db.uno('SELECT * FROM incidencia WHERE id = ?', rep.incidencia_id);
+    if (!puedeEncuestar(rep, inc)) throw new ErrorNegocio('La encuesta de este reporte ya no está disponible.', 409);
+    const ot = inc.orden_actual_id ? db.uno('SELECT id, cuadrilla_id FROM orden_trabajo WHERE id = ?', inc.orden_actual_id) : null;
+    db.ejecutar(`INSERT INTO encuesta (reporte_id, incidencia_id, orden_trabajo_id, cuadrilla_id, general, rapidez, fecha)
+                 VALUES (?,?,?,?,?,?,?)`, rep.id, inc.id, ot ? ot.id : null, ot ? ot.cuadrilla_id : null, general, rapidez, iso());
+    auditoria.registrar({ accion: 'CLIENTE_ENCUESTA', entidad: 'incidencia', entidadId: inc.id,
+      detalle: `${rep.codigo}: general ${general ?? '-'} · rapidez ${rapidez ?? '-'}`, ip });
+    return consultaPublica(rep.codigo, String(rep.telefono).slice(-4), null);
+  });
 }
 
 // ---------------------------------------------------------------- bandeja y detalle
 function listar(f = {}) {
   const cond = [], p = [];
-  if (f.estado === 'ABIERTAS') cond.push("i.estado IN ('REGISTRADA','ASIGNADA','EN_ATENCION')");
+  if (f.estado === 'ABIERTAS') cond.push(`i.estado IN (${SQL_ABIERTOS})`);
+  else if (f.estado === 'EN_CAMPO') cond.push("i.estado IN ('EN_CAMINO','EN_LUGAR','REPARANDO')");
   else if (f.estado) { cond.push('i.estado = ?'); p.push(f.estado); }
   if (f.tipo_id) { cond.push('i.tipo_id = ?'); p.push(Number(f.tipo_id)); }
   if (f.zona_id) { cond.push('i.zona_id = ?'); p.push(Number(f.zona_id)); }
   if (f.unidad_id) { cond.push('z.unidad_negocio_id = ?'); p.push(Number(f.unidad_id)); }
   if (f.area_id) { cond.push('i.area_id = ?'); p.push(Number(f.area_id)); }
-  if (f.vencidas === '1') { cond.push("i.estado IN ('REGISTRADA','ASIGNADA','EN_ATENCION') AND i.fecha_limite < ?"); p.push(iso()); }
+  if (f.vencidas === '1') { cond.push(`i.estado IN (${SQL_ABIERTOS}) AND i.fecha_limite < ?`); p.push(iso()); }
+  if (f.cuadrilla_id) { cond.push('ot.cuadrilla_id = ?'); p.push(Number(f.cuadrilla_id)); }
   if (f.desde) { cond.push('i.fecha_registro >= ?'); p.push(new Date(`${f.desde}T00:00:00-05:00`).toISOString()); }
   if (f.hasta) { cond.push('i.fecha_registro < ?'); p.push(sumarHoras(new Date(`${f.hasta}T00:00:00-05:00`).toISOString(), 24)); }
   if (f.q) {
@@ -257,11 +461,14 @@ function listar(f = {}) {
   const where = cond.length ? `WHERE ${cond.join(' AND ')}` : '';
   const limite = Math.min(Number(f.limite) || 300, 2000);
   return db.todos(
-    `SELECT i.*, t.nombre AS tipo, t.codigo AS tipo_codigo, z.nombre AS zona, u.nombre AS unidad, a.nombre AS area
+    `SELECT i.*, t.nombre AS tipo, t.codigo AS tipo_codigo, z.nombre AS zona, u.nombre AS unidad, a.nombre AS area, a.codigo AS area_codigo,
+            ot.codigo AS orden, ot.estado AS orden_estado, ot.eta, cu.codigo AS cuadrilla, cu.tipo AS cuadrilla_tipo,
+            (SELECT COUNT(*) FROM reporte r WHERE r.incidencia_id = i.id AND r.requiere_acceso = 1) AS requiere_acceso
        FROM incidencia i JOIN tipo_incidencia t ON t.id = i.tipo_id JOIN zona z ON z.id = i.zona_id
        JOIN unidad_negocio u ON u.id = z.unidad_negocio_id JOIN area a ON a.id = i.area_id
+       LEFT JOIN orden_trabajo ot ON ot.id = i.orden_actual_id LEFT JOIN cuadrilla cu ON cu.id = ot.cuadrilla_id
        ${where}
-      ORDER BY CASE WHEN i.estado IN ('REGISTRADA','ASIGNADA','EN_ATENCION') THEN 0 ELSE 1 END,
+      ORDER BY CASE WHEN i.estado IN (${SQL_ABIERTOS}) THEN 0 WHEN i.estado = 'RESTABLECIDA' THEN 1 ELSE 2 END,
                CASE i.prioridad WHEN 'CRITICA' THEN 0 WHEN 'ALTA' THEN 1 WHEN 'MEDIA' THEN 2 ELSE 3 END,
                i.fecha_limite ASC
       LIMIT ?`, ...p, limite,
@@ -270,8 +477,8 @@ function listar(f = {}) {
 
 function detalle(id) {
   const inc = db.uno(
-    `SELECT i.*, t.nombre AS tipo, t.codigo AS tipo_codigo, t.plazo_horas, z.nombre AS zona, u.nombre AS unidad, a.nombre AS area,
-            f.codigo AS fusionada_en
+    `SELECT i.*, t.nombre AS tipo, t.codigo AS tipo_codigo, t.plazo_horas, z.nombre AS zona, z.unidad_negocio_id, u.nombre AS unidad,
+            a.nombre AS area, a.codigo AS area_codigo, f.codigo AS fusionada_en
        FROM incidencia i JOIN tipo_incidencia t ON t.id = i.tipo_id JOIN zona z ON z.id = i.zona_id
        JOIN unidad_negocio u ON u.id = z.unidad_negocio_id JOIN area a ON a.id = i.area_id
        LEFT JOIN incidencia f ON f.id = i.fusionada_en_id
@@ -281,11 +488,26 @@ function detalle(id) {
   inc.reportes = db.todos(
     `SELECT r.*, us.nombre AS registrado_por_nombre FROM reporte r LEFT JOIN usuario us ON us.id = r.registrado_por
       WHERE r.incidencia_id = ? ORDER BY r.fecha`, inc.id,
-  );
+  ).map((r) => ({ ...r, franja_texto: r.franja_horaria ? FRANJAS_TEXTO[r.franja_horaria] : null, encuesta: encuestaDe(r) }));
   inc.historial = db.todos(
     `SELECT h.*, us.nombre AS usuario FROM historial h LEFT JOIN usuario us ON us.id = h.usuario_id
       WHERE h.incidencia_id = ? ORDER BY h.fecha, h.id`, inc.id,
   );
+  inc.ordenes = db.todos(
+    `SELECT ot.*, c.codigo AS cuadrilla_codigo, c.nombre AS cuadrilla_nombre, c.tipo AS cuadrilla_tipo, e.nombre AS empresa,
+            j.nombre AS jefe, ca.nombre AS causa, ca.responsabilidad, ua.nombre AS asignada_por_nombre, uv.nombre AS validado_por_nombre,
+            c.lat AS cuadrilla_lat, c.lng AS cuadrilla_lng, c.fecha_ubicacion
+       FROM orden_trabajo ot JOIN cuadrilla c ON c.id = ot.cuadrilla_id LEFT JOIN empresa_contratista e ON e.id = c.empresa_id
+       LEFT JOIN usuario j ON j.id = c.jefe_usuario_id LEFT JOIN causa ca ON ca.id = ot.causa_id
+       LEFT JOIN usuario ua ON ua.id = ot.asignada_por LEFT JOIN usuario uv ON uv.id = ot.validado_por
+      WHERE ot.incidencia_id = ? ORDER BY ot.id DESC`, inc.id,
+  );
+  inc.orden_actual = inc.ordenes.find((o) => o.id === inc.orden_actual_id) || null;
+  for (const r of inc.reportes) r.confirmacion_vigente = confirmacionVigente(r, inc);
+  inc.confirmaciones = {
+    si: inc.reportes.filter((r) => confirmacionVigente(r, inc) === 'SI').length,
+    no: inc.reportes.filter((r) => confirmacionVigente(r, inc) === 'NO').length,
+  };
   return inc;
 }
 
@@ -297,86 +519,58 @@ function porCodigo(codigo) {
   return fila.id;
 }
 
-// ---------------------------------------------------------------- flujo de estados
-const TRANSICIONES = {
-  asignar: { desde: ['REGISTRADA', 'ASIGNADA'], hacia: 'ASIGNADA', roles: ['ADMIN', 'OPERADOR', 'SUPERVISOR'] },
-  iniciar: { desde: ['ASIGNADA'], hacia: 'EN_ATENCION', roles: ['ADMIN', 'SUPERVISOR'] },
-  solucionar: { desde: ['ASIGNADA', 'EN_ATENCION'], hacia: 'SOLUCIONADA', roles: ['ADMIN', 'SUPERVISOR'] },
-  anular: { desde: ['REGISTRADA', 'ASIGNADA'], hacia: 'ANULADA', roles: ['ADMIN', 'OPERADOR', 'SUPERVISOR'] },
-};
-
-function puedeOperarArea(usuario, inc) {
-  return usuario.rol !== 'SUPERVISOR' || usuario.area_id == null || usuario.area_id === inc.area_id;
+// ---------------------------------------------------------------- anulación
+// Quién puede actuar sobre una incidencia según el proceso:
+//  - Centro de Control de Operaciones (DESPACHADOR): emergencias del área de Operaciones (cortes, cables, luz baja).
+//  - Supervisor de área: las incidencias de su área (alumbrado público, mantenimiento de redes) y la validación del cierre.
+//  - Atención al Cliente (OPERADOR): registra, anula reportes improcedentes y fusiona duplicados; no despacha.
+function esDeSuArea(usuario, inc) {
+  if (usuario.rol === 'ADMIN') return true;
+  const areaCodigo = db.uno('SELECT codigo FROM area WHERE id = ?', inc.area_id).codigo;
+  if (usuario.rol === 'DESPACHADOR') return areaCodigo === 'OPE';
+  if (usuario.rol === 'SUPERVISOR') return usuario.area_id === inc.area_id;
+  return false;
 }
 
-function cambiarEstado(id, accion, datos, usuario, ip = null) {
-  const regla = TRANSICIONES[accion];
-  if (!regla) throw new ErrorNegocio('Acción no válida.');
-  if (!regla.roles.includes(usuario.rol)) throw new ErrorNegocio('Tu rol no permite esta acción.', 403);
+function anular(id, motivo, usuario, ip = null) {
+  if (!['ADMIN', 'OPERADOR', 'DESPACHADOR', 'SUPERVISOR'].includes(usuario.rol)) throw new ErrorNegocio('Tu rol no permite esta acción.', 403);
   return db.transaccion(() => {
     const inc = db.uno('SELECT * FROM incidencia WHERE id = ?', Number(id));
     if (!inc) throw new ErrorNegocio('Incidencia no encontrada.', 404);
-    if (!regla.desde.includes(inc.estado)) {
-      throw new ErrorNegocio(`No se puede ${accion} una incidencia en estado ${inc.estado.replace('_', ' ')}.`, 409);
-    }
-    if (!puedeOperarArea(usuario, inc)) throw new ErrorNegocio('La incidencia pertenece a otra área.', 403);
+    if (!['REGISTRADA', 'ASIGNADA'].includes(inc.estado)) throw new ErrorNegocio('Solo se anula una incidencia registrada o asignada (antes de que la cuadrilla salga).', 409);
+    if (usuario.rol !== 'OPERADOR' && !esDeSuArea(usuario, inc)) throw new ErrorNegocio('La incidencia pertenece a otra área.', 403);
+    const comentario = opcional(motivo, 300);
+    if (!comentario) throw new ErrorNegocio('Indica el motivo de la anulación.');
     const fecha = iso();
-    let comentario = opcional(datos.comentario, 500);
-    const sets = ['estado = ?'], vals = [regla.hacia];
-
-    if (accion === 'asignar') {
-      const area = db.uno('SELECT * FROM area WHERE id = ?', numero(datos.area_id) ?? inc.area_id);
-      if (!area) throw new ErrorNegocio('Área no válida.');
-      const cuadrilla = opcional(datos.cuadrilla, 80);
-      if (!cuadrilla) throw new ErrorNegocio('Indica la cuadrilla o responsable que atenderá la falla.');
-      sets.push('area_id = ?', 'cuadrilla = ?', 'fecha_asignacion = COALESCE(fecha_asignacion, ?)');
-      vals.push(area.id, cuadrilla, fecha);
-      comentario = `Asignada a ${area.nombre} · ${cuadrilla}${comentario ? ` · ${comentario}` : ''}`;
+    if (inc.orden_actual_id) {
+      db.ejecutar("UPDATE orden_trabajo SET estado = 'CANCELADA', observacion = ? WHERE id = ? AND estado = 'ASIGNADA'", `Incidencia anulada: ${comentario}`, inc.orden_actual_id);
     }
-    if (accion === 'iniciar') {
-      sets.push('fecha_atencion = ?'); vals.push(fecha);
-      comentario = comentario || 'Cuadrilla en atención';
-    }
-    if (accion === 'solucionar') {
-      const det = opcional(datos.detalle_solucion, 500);
-      if (!det) throw new ErrorNegocio('Describe la solución aplicada.');
-      sets.push('fecha_atencion = COALESCE(fecha_atencion, ?)', 'fecha_solucion = ?', 'detalle_solucion = ?');
-      vals.push(fecha, fecha, det);
-      comentario = det;
-    }
-    if (accion === 'anular') {
-      if (!comentario) throw new ErrorNegocio('Indica el motivo de la anulación.');
-    }
-    db.ejecutar(`UPDATE incidencia SET ${sets.join(', ')} WHERE id = ?`, ...vals, inc.id);
-    db.ejecutar(
-      'INSERT INTO historial (incidencia_id, estado_anterior, estado_nuevo, comentario, usuario_id, fecha) VALUES (?,?,?,?,?,?)',
-      inc.id, inc.estado, regla.hacia, comentario, usuario.id, fecha,
-    );
+    db.ejecutar("UPDATE incidencia SET estado = 'ANULADA' WHERE id = ?", inc.id);
+    db.ejecutar('INSERT INTO historial (incidencia_id, estado_anterior, estado_nuevo, comentario, usuario_id, fecha) VALUES (?,?,?,?,?,?)',
+      inc.id, inc.estado, 'ANULADA', comentario, usuario.id, fecha);
     const act = db.uno('SELECT * FROM incidencia WHERE id = ?', inc.id);
-    if (accion === 'solucionar' || accion === 'anular') {
-      for (const rep of db.todos('SELECT * FROM reporte WHERE incidencia_id = ?', inc.id)) {
-        notif.encolar(rep, accion === 'solucionar' ? notif.mensajes.solucion(rep, act) : notif.mensajes.anulacion(rep, comentario));
-      }
-    }
-    auditoria.registrar({
-      usuarioId: usuario.id, accion: `INCIDENCIA_${accion.toUpperCase()}`, entidad: 'incidencia', entidadId: inc.id, ip,
-      detalle: `${inc.codigo}: ${inc.estado} → ${regla.hacia}${comentario ? ` · ${comentario}` : ''}`,
-    });
+    for (const rep of db.todos('SELECT * FROM reporte WHERE incidencia_id = ?', inc.id)) notif.encolar(rep, notif.mensajes.anulacion(rep, comentario));
+    auditoria.registrar({ usuarioId: usuario.id, accion: 'INCIDENCIA_ANULAR', entidad: 'incidencia', entidadId: inc.id, ip, detalle: `${inc.codigo}: ${inc.estado} → ANULADA · ${comentario}` });
     return act;
   });
 }
 
 // Fusión manual: el personal detecta un duplicado que el sistema no agrupó
 function fusionar(origenId, codigoDestino, usuario, ip = null) {
-  if (!['ADMIN', 'OPERADOR', 'SUPERVISOR'].includes(usuario.rol)) throw new ErrorNegocio('Tu rol no permite esta acción.', 403);
+  if (!['ADMIN', 'OPERADOR', 'DESPACHADOR', 'SUPERVISOR'].includes(usuario.rol)) throw new ErrorNegocio('Tu rol no permite esta acción.', 403);
   return db.transaccion(() => {
     const origen = db.uno('SELECT * FROM incidencia WHERE id = ?', Number(origenId));
     const destino = db.uno('SELECT * FROM incidencia WHERE codigo = ?', texto(codigoDestino, 30).toUpperCase());
     if (!origen || !destino) throw new ErrorNegocio('No se encontró una de las incidencias.', 404);
     if (origen.id === destino.id) throw new ErrorNegocio('No puedes fusionar una incidencia consigo misma.');
     if (!ABIERTOS.includes(origen.estado) || !ABIERTOS.includes(destino.estado)) throw new ErrorNegocio('Ambas incidencias deben estar abiertas.', 409);
+    if (!['REGISTRADA', 'ASIGNADA', 'EN_CAMINO'].includes(origen.estado)) throw new ErrorNegocio('La cuadrilla ya está trabajando en esta incidencia; fusiona la otra en ella.', 409);
     if (origen.tipo_id !== destino.tipo_id) throw new ErrorNegocio('Solo se fusionan incidencias del mismo tipo.');
     const fecha = iso();
+    if (origen.orden_actual_id) {
+      db.ejecutar("UPDATE orden_trabajo SET estado = 'CANCELADA', observacion = ? WHERE id = ? AND estado IN ('ASIGNADA','EN_CAMINO')",
+        `Fusionada en ${destino.codigo}`, origen.orden_actual_id);
+    }
     const n = db.ejecutar(
       `UPDATE reporte SET incidencia_id = ?, es_duplicado = 1, tipo_agrupacion = COALESCE(tipo_agrupacion, 'MANUAL') WHERE incidencia_id = ?`,
       destino.id, origen.id,
@@ -400,6 +594,6 @@ function fusionar(origenId, codigoDestino, usuario, ip = null) {
 }
 
 module.exports = {
-  catalogo, registrarReporte, buscarCoincidencia, consultaPublica, listar, detalle, porCodigo,
-  cambiarEstado, fusionar, TRANSICIONES, ABIERTOS,
+  catalogo, registrarReporte, buscarCoincidencia, consultaPublica, confirmar, responderEncuesta, listar, detalle, porCodigo,
+  anular, fusionar, esDeSuArea, ABIERTOS, SQL_ABIERTOS, CON_SOLUCION, FRANJAS_TEXTO, guardarFoto, borrarFoto,
 };

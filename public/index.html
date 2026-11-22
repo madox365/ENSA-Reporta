@@ -47,17 +47,15 @@
     <div class="contenedor">
       <div class="tarjeta">
         <h2>Ingresar con mi suministro</h2>
-        <p class="muted">Al ingresar, tu dirección se completa sola y puedes ver todos tus reportes.</p>
+        <p class="muted">Solo necesitas tu número de suministro. Tus datos y la ubicación de tu domicilio se completan solos y puedes ver todos tus reportes.</p>
         <div class="recibo">
           <svg viewBox="0 0 64 80" aria-hidden="true"><rect x="1" y="1" width="62" height="78" rx="4" fill="#fff" stroke="#c5d6ea"/><rect x="6" y="6" width="24" height="6" rx="1" fill="#0b2545"/><rect x="34" y="6" width="24" height="10" rx="2" fill="#fff7e0" stroke="#f2a900" stroke-width="1.5"/><rect x="37" y="9" width="18" height="4" rx="1" fill="#b37d00"/><rect x="6" y="20" width="52" height="3" rx="1" fill="#d9dfe7"/><rect x="6" y="27" width="40" height="3" rx="1" fill="#d9dfe7"/><rect x="6" y="34" width="46" height="3" rx="1" fill="#d9dfe7"/><rect x="6" y="60" width="52" height="12" rx="2" fill="#e6eef7"/></svg>
           <div>El <b>número de suministro</b> está en la parte superior de tu recibo de luz, junto a tu nombre. También aparece cuando pagas en agentes o por aplicativo.</div>
         </div>
         <form id="f-ingresar" novalidate>
           <label for="i-suministro">Número de suministro</label>
-          <input id="i-suministro" type="text" inputmode="numeric" autocomplete="off" maxlength="12" required>
-          <label for="i-documento">DNI (o RUC) del titular del suministro</label>
-          <input id="i-documento" type="text" inputmode="numeric" autocomplete="off" maxlength="11" required>
-          <p class="ayuda">Lo pedimos para confirmar que el suministro es tuyo. No compartimos tus datos.</p>
+          <input id="i-suministro" type="text" inputmode="numeric" autocomplete="off" maxlength="12" placeholder="Ej.: 10234567" required>
+          <p class="ayuda">Con tu número de suministro cargamos tu nombre, dirección, ubicación y celular registrados. No compartimos tus datos.</p>
           <div id="e-ingresar"></div>
           <div class="acciones mt-s">
             <button class="btn btn-primario" type="submit">Ingresar</button>
@@ -78,10 +76,23 @@
         <div class="seccion-titulo">1. ¿Qué pasa?</div>
         <div class="tipos" id="tipos" role="group" aria-label="Tipo de incidencia"></div>
         <div id="alerta-cable" class="aviso aviso-alerta oculto"><b>Peligro:</b> no te acerques ni toques el cable. Mantén alejadas a otras personas. Si hay chispas o fuego, llama también al 116 (Bomberos).</div>
+        <div id="alcance" class="oculto">
+          <div class="seccion-titulo">¿A quién afecta?</div>
+          <div class="alcance-opciones">
+            <label class="check"><input type="radio" name="alcance" value="VARIAS_CASAS" checked> <span>A varias casas o a toda la calle</span></label>
+            <label class="check"><input type="radio" name="alcance" value="SOLO_MI_CASA"> <span>Solo a mi casa (mis vecinos sí tienen luz)</span></label>
+            <label class="check"><input type="radio" name="alcance" value="NO_SE"> <span>No sé</span></label>
+          </div>
+          <div id="acceso" class="oculto">
+            <label class="check mt-s"><input type="checkbox" id="r-acceso"> <span>Mi medidor está dentro de mi casa, o la luz baja es solo en mi casa: la cuadrilla necesitará entrar</span></label>
+            <div id="franja-campo" class="oculto"><label for="r-franja">¿En qué horario habrá alguien en casa?</label><select id="r-franja"></select></div>
+          </div>
+        </div>
+        <p class="ayuda oculto" id="presencia-msg"></p>
 
         <div class="seccion-titulo">2. ¿Dónde?</div>
         <div id="donde-suministro" class="oculto">
-          <label class="check"><input type="radio" name="donde" value="suministro" checked> <span>En mi domicilio: <b id="dir-suministro"></b></span></label>
+          <label class="check"><input type="radio" name="donde" value="suministro" checked> <span>En mi domicilio: <b id="dir-suministro"></b><br><span class="peq muted" id="ubic-suministro"></span></span></label>
           <label class="check"><input type="radio" name="donde" value="otro"> <span>En otro lugar (calle, parque, otro barrio)</span></label>
         </div>
         <div id="donde-otro">

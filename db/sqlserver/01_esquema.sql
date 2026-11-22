@@ -45,7 +45,7 @@ CREATE TABLE dbo.usuario (
   id          INT IDENTITY(1,1) PRIMARY KEY,
   usuario     VARCHAR(40)   NOT NULL UNIQUE,         -- en producción: UPN de Office 365 (Entra ID)
   nombre      NVARCHAR(120) NOT NULL,
-  rol         VARCHAR(12)   NOT NULL CHECK (rol IN ('ADMIN','OPERADOR','SUPERVISOR','GERENCIA')),
+  rol         VARCHAR(15)   NOT NULL CHECK (rol IN ('ADMIN','OPERADOR','DESPACHADOR','SUPERVISOR','JEFE_CUADRILLA','GERENCIA')),
   area_id     INT           NULL REFERENCES dbo.area(id),
   clave_hash  VARCHAR(200)  NULL,                    -- NULL cuando el acceso es solo por Entra ID
   activo      BIT           NOT NULL DEFAULT 1,
@@ -74,16 +74,18 @@ CREATE TABLE dbo.incidencia (
   direccion          NVARCHAR(420) NOT NULL,
   lat                DECIMAL(9,6)  NULL,
   lng                DECIMAL(9,6)  NULL,
-  estado             VARCHAR(12)   NOT NULL CHECK (estado IN ('REGISTRADA','ASIGNADA','EN_ATENCION','SOLUCIONADA','ANULADA')),
+  estado             VARCHAR(12)   NOT NULL CHECK (estado IN ('REGISTRADA','ASIGNADA','EN_CAMINO','EN_LUGAR','REPARANDO','RESTABLECIDA','SOLUCIONADA','ANULADA')),
   prioridad          VARCHAR(10)   NOT NULL,
   area_id            INT           NOT NULL REFERENCES dbo.area(id),
-  cuadrilla          NVARCHAR(80)  NULL,
+  orden_actual_id    INT           NULL,          -- FK a orden_trabajo (se agrega al final)
   fecha_registro     DATETIME2(3)  NOT NULL,
   fecha_limite       DATETIME2(3)  NOT NULL,
   fecha_asignacion   DATETIME2(3)  NULL,
-  fecha_atencion     DATETIME2(3)  NULL,
-  fecha_solucion     DATETIME2(3)  NULL,
+  fecha_atencion     DATETIME2(3)  NULL,          -- llegada de la cuadrilla
+  fecha_solucion     DATETIME2(3)  NULL,          -- servicio restablecido
+  fecha_validacion   DATETIME2(3)  NULL,
   detalle_solucion   NVARCHAR(500) NULL,
+  reaperturas        INT           NOT NULL DEFAULT 0,
   fusionada_en_id    INT           NULL REFERENCES dbo.incidencia(id),
   cantidad_reportes  INT           NOT NULL DEFAULT 0
 );
@@ -110,6 +112,11 @@ CREATE TABLE dbo.reporte (
   foto             VARCHAR(60)   NULL,
   es_duplicado     BIT           NOT NULL DEFAULT 0,
   tipo_agrupacion  VARCHAR(10)   NULL CHECK (tipo_agrupacion IN ('AUTOMATICA','MANUAL')),
+  alcance          VARCHAR(12)   NULL CHECK (alcance IN ('SOLO_MI_CASA','VARIAS_CASAS','NO_SE')),
+  requiere_acceso  BIT           NOT NULL DEFAULT 0,
+  franja_horaria   VARCHAR(15)   NULL,
+  confirmacion     VARCHAR(2)    NULL CHECK (confirmacion IN ('SI','NO')),
+  fecha_confirmacion DATETIME2(3) NULL,
   consentimiento   BIT           NOT NULL DEFAULT 1,
   registrado_por   INT           NULL REFERENCES dbo.usuario(id),
   fecha            DATETIME2(3)  NOT NULL
@@ -117,6 +124,80 @@ CREATE TABLE dbo.reporte (
 CREATE INDEX ix_reporte_incidencia ON dbo.reporte (incidencia_id);
 CREATE INDEX ix_reporte_fecha      ON dbo.reporte (fecha);
 CREATE INDEX ix_reporte_suministro ON dbo.reporte (suministro);
+
+CREATE TABLE dbo.empresa_contratista (
+  id              INT IDENTITY(1,1) PRIMARY KEY,
+  nombre          NVARCHAR(150) NOT NULL,
+  ruc             CHAR(11)      NULL,
+  servicio        NVARCHAR(300) NOT NULL,
+  contrato        NVARCHAR(80)  NULL,
+  vigencia_hasta  DATE          NULL,
+  activo          BIT           NOT NULL DEFAULT 1
+);
+
+CREATE TABLE dbo.cuadrilla (
+  id                 INT IDENTITY(1,1) PRIMARY KEY,
+  codigo             VARCHAR(20)   NOT NULL UNIQUE,
+  nombre             NVARCHAR(80)  NOT NULL,
+  tipo               VARCHAR(12)   NOT NULL CHECK (tipo IN ('PROPIA','CONTRATISTA')),
+  empresa_id         INT           NULL REFERENCES dbo.empresa_contratista(id),
+  area_id            INT           NOT NULL REFERENCES dbo.area(id),
+  unidad_negocio_id  INT           NOT NULL REFERENCES dbo.unidad_negocio(id),
+  zona_base_id       INT           NULL REFERENCES dbo.zona(id),
+  jefe_usuario_id    INT           NULL REFERENCES dbo.usuario(id),
+  integrantes        INT           NOT NULL DEFAULT 3,
+  vehiculo           VARCHAR(20)   NULL,
+  en_turno           BIT           NOT NULL DEFAULT 1,
+  lat                DECIMAL(9,6)  NULL,          -- solo visible para personal de ENSA
+  lng                DECIMAL(9,6)  NULL,
+  fecha_ubicacion    DATETIME2(3)  NULL,
+  activo             BIT           NOT NULL DEFAULT 1,
+  CONSTRAINT ck_cuadrilla_empresa CHECK (tipo = 'PROPIA' OR empresa_id IS NOT NULL)
+);
+
+CREATE TABLE dbo.cuadrilla_ubicacion (
+  id            BIGINT IDENTITY(1,1) PRIMARY KEY,
+  cuadrilla_id  INT          NOT NULL REFERENCES dbo.cuadrilla(id),
+  lat           DECIMAL(9,6) NOT NULL,
+  lng           DECIMAL(9,6) NOT NULL,
+  fecha         DATETIME2(3) NOT NULL
+);
+CREATE INDEX ix_ubicacion_cuadrilla ON dbo.cuadrilla_ubicacion (cuadrilla_id, fecha);
+
+CREATE TABLE dbo.causa (
+  id               INT          NOT NULL PRIMARY KEY,
+  codigo           VARCHAR(5)   NOT NULL UNIQUE,
+  nombre           NVARCHAR(120) NOT NULL,
+  responsabilidad  VARCHAR(12)  NOT NULL CHECK (responsabilidad IN ('ENSA','CLIENTE','TERCEROS','NATURALEZA'))
+);
+
+CREATE TABLE dbo.orden_trabajo (
+  id                  INT IDENTITY(1,1) PRIMARY KEY,
+  codigo              VARCHAR(20)   NOT NULL UNIQUE,
+  incidencia_id       INT           NOT NULL REFERENCES dbo.incidencia(id),
+  cuadrilla_id        INT           NOT NULL REFERENCES dbo.cuadrilla(id),
+  estado              VARCHAR(12)   NOT NULL CHECK (estado IN ('ASIGNADA','EN_CAMINO','EN_LUGAR','REPARANDO','RESTABLECIDA','VALIDADA','CANCELADA','RECHAZADA')),
+  instrucciones       NVARCHAR(300) NULL,
+  asignada_por        INT           NULL REFERENCES dbo.usuario(id),
+  fecha_asignacion    DATETIME2(3)  NOT NULL,
+  fecha_en_camino     DATETIME2(3)  NULL,
+  eta                 DATETIME2(3)  NULL,
+  eta_manual          BIT           NOT NULL DEFAULT 0,
+  distancia_km        DECIMAL(7,1)  NULL,
+  fecha_llegada       DATETIME2(3)  NULL,
+  fecha_reparando     DATETIME2(3)  NULL,
+  fecha_restablecida  DATETIME2(3)  NULL,
+  causa_id            INT           NULL REFERENCES dbo.causa(id),
+  trabajo_realizado   NVARCHAR(500) NULL,
+  foto_cierre         VARCHAR(60)   NULL,
+  validado_por        INT           NULL REFERENCES dbo.usuario(id),
+  fecha_validacion    DATETIME2(3)  NULL,
+  observacion         NVARCHAR(300) NULL,
+  devoluciones        INT           NOT NULL DEFAULT 0
+);
+CREATE INDEX ix_ot_cuadrilla  ON dbo.orden_trabajo (cuadrilla_id, estado);
+CREATE INDEX ix_ot_incidencia ON dbo.orden_trabajo (incidencia_id);
+ALTER TABLE dbo.incidencia ADD CONSTRAINT fk_incidencia_orden FOREIGN KEY (orden_actual_id) REFERENCES dbo.orden_trabajo(id);
 
 CREATE TABLE dbo.historial (
   id               BIGINT IDENTITY(1,1) PRIMARY KEY,
@@ -138,6 +219,21 @@ CREATE TABLE dbo.notificacion (
   estado      VARCHAR(10)   NOT NULL CHECK (estado IN ('PENDIENTE','ENVIADO','ERROR')),
   fecha       DATETIME2(3)  NOT NULL
 );
+
+-- Encuesta de satisfacción, totalmente opcional (1 a 5 estrellas), una por reporte
+CREATE TABLE dbo.encuesta (
+  id                INT IDENTITY(1,1) PRIMARY KEY,
+  reporte_id        INT            NOT NULL UNIQUE REFERENCES dbo.reporte(id),
+  incidencia_id     INT            NOT NULL REFERENCES dbo.incidencia(id),
+  orden_trabajo_id  INT            NULL REFERENCES dbo.orden_trabajo(id),
+  cuadrilla_id      INT            NULL REFERENCES dbo.cuadrilla(id),
+  general           TINYINT        NULL CHECK (general BETWEEN 1 AND 5),
+  rapidez           TINYINT        NULL CHECK (rapidez BETWEEN 1 AND 5),
+  fecha             DATETIME2(3)   NOT NULL,
+  CONSTRAINT ck_encuesta_respuesta CHECK (general IS NOT NULL OR rapidez IS NOT NULL)
+);
+CREATE INDEX ix_encuesta_incidencia ON dbo.encuesta (incidencia_id);
+CREATE INDEX ix_encuesta_cuadrilla ON dbo.encuesta (cuadrilla_id);
 
 CREATE TABLE dbo.auditoria (
   id          BIGINT IDENTITY(1,1) PRIMARY KEY,

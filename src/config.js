@@ -19,6 +19,7 @@ module.exports = {
   // Límite de reportes públicos por IP
   limiteReportesPorIp: Number(process.env.RATE_LIMIT_REPORTES || 10),
   ventanaLimiteMin: Number(process.env.RATE_LIMIT_MIN || 10),
+  limiteIngresosPorIp: Number(process.env.RATE_LIMIT_LOGIN || 20),
   tamanoMaxFotoKB: Number(process.env.MAX_FOTO_KB || 3072),
   confiarProxy: process.env.TRUST_PROXY === '1',
 };
