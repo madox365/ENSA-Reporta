@@ -32,6 +32,7 @@ function mostrarLogin(msg) {
   $('#chip-usuario').classList.add('oculto'); $('#btn-salir').classList.add('oculto');
   mostrarError($('#e-login'), msg ? { message: msg } : null);
 }
+conOjo($('#f-login'));
 $('#f-login').addEventListener('submit', async (e) => {
   e.preventDefault();
   const btn = e.submitter; btn.disabled = true; mostrarError($('#e-login'));
@@ -386,6 +387,7 @@ async function vUsuarios() {
       <label>Contraseña inicial</label><input name="clave" type="password" autocomplete="new-password" required>
       <p class="ayuda">Mínimo 10 caracteres, con letras y números. En producción el acceso se hará con la cuenta de Office 365.</p>
       <div id="u-error"></div><button class="btn btn-primario mt-s" type="submit">Crear usuario</button></form>`;
+  conOjo($('#u-form'));
   const cargar = async () => {
     const l = await llamar('/api/admin/usuarios');
     $('#u-lista').innerHTML = `<table><thead><tr><th>Usuario</th><th>Nombre</th><th>Rol</th><th>Área</th><th>Estado</th><th></th></tr></thead><tbody>

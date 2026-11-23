@@ -73,9 +73,36 @@ const ICONOS = {
   reloj: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
   herramienta: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
   telefono: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2"/>',
+  ojo: '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  ojoTachado: '<path d="M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-2.6 3.5M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.6 9.6 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><path d="m3 3 18 18"/>',
 };
 function icono(nombre, clase = 'i') {
   return `<svg class="${clase}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONOS[nombre] || ICONOS.rayo}</svg>`;
+}
+
+// Agrega el botón "ojito" para ver u ocultar la contraseña a cada campo de contraseña dentro de raiz.
+// Al enviar el formulario la contraseña vuelve a ocultarse.
+function conOjo(raiz = document) {
+  for (const campo of raiz.querySelectorAll('input[type=password]:not([data-ojo])')) {
+    campo.dataset.ojo = '1';
+    const caja = document.createElement('div');
+    caja.className = 'campo-clave';
+    campo.replaceWith(caja);
+    const boton = document.createElement('button');
+    boton.type = 'button';
+    boton.className = 'btn-ojo';
+    caja.append(campo, boton);
+    const pintar = (visible) => {
+      campo.type = visible ? 'text' : 'password';
+      boton.innerHTML = icono(visible ? 'ojoTachado' : 'ojo');
+      boton.setAttribute('aria-label', visible ? 'Ocultar contraseña' : 'Mostrar contraseña');
+      boton.setAttribute('aria-pressed', String(visible));
+      boton.title = boton.getAttribute('aria-label');
+    };
+    pintar(false);
+    boton.addEventListener('click', () => { pintar(campo.type === 'password'); campo.focus(); });
+    if (campo.form) campo.form.addEventListener('submit', () => pintar(false));
+  }
 }
 const LOGO = '<svg viewBox="0 0 662 740" aria-hidden="true"><path d="M0 368V133A133 133 0 0 1 133 0H331Z" fill="#43b02a"/><path d="M331 368 662 0V368Z" fill="#0072ce"/><path d="M0 372H331L0 740Z" fill="#0072ce"/><path d="M331 740 662 372V605A135 135 0 0 1 527 740Z" fill="#43b02a"/></svg>';
 

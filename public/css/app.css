@@ -74,6 +74,13 @@ input[type=text], input[type=tel], input[type=email], input[type=password], inpu
 select { background-color: #fff; border-color: #9aa3ad; box-shadow: none; }
 textarea { min-height: 80px; resize: vertical; }
 input::placeholder, textarea::placeholder { color: #6c757d; }
+/* Campo de contraseña con botón para verla u ocultarla */
+.campo-clave { position: relative; }
+.campo-clave input { padding-right: 3rem; }
+.btn-ojo { position: absolute; top: 0; right: 0; width: 44px; height: 44px; display: grid; place-items: center; padding: 0; border: 0; background: none; color: var(--tinta-3); cursor: pointer; border-radius: 4px; }
+.btn-ojo:hover { color: var(--azul-600); }
+.btn-ojo:focus-visible { outline: 3px solid rgba(0,114,206,.35); outline-offset: -3px; }
+.btn-ojo .i { width: 20px; height: 20px; }
 input:focus, select:focus, textarea:focus, .btn:focus-visible, .tipo:focus-visible { outline: 3px solid rgba(0,114,206,.35); outline-offset: 1px; border-color: var(--azul-600); }
 input:focus, textarea:focus { background: #fff; }
 .fila { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
